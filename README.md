@@ -1,4 +1,4 @@
-# go-musthave-metrics-tpl
+# go-yandex-metrics
 
 Шаблон репозитория для трека «Сервер сбора метрик и алертинга».
 
