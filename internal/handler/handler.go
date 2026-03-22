@@ -19,27 +19,29 @@ func Init() {
 }
 
 func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+
 	if req.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	// массив вида ["update", "counter", "test", "100"]
-	paths := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	// массив вида ["", "update", "counter", "test", "100"]
+	paths := strings.Split(req.URL.Path, "/")
 
-	if len(paths) != 4 || paths[0] != "update" {
+	if len(paths) != 5 || paths[1] != "update" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
 	fmt.Printf("paths: %v\r\n", paths)
 
-	metricType := paths[1]
-	metricName := paths[2]
-	metricValue := paths[3]
+	metricType := paths[2]
+	metricName := paths[3]
+	metricValue := paths[4]
 
 	fmt.Printf("metricType: %s metricName: %s metricValue: %s\r\n", metricType, metricName, metricValue)
 
-	if metricName == "" || metricValue == "" {
+	if metricName == "" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -67,7 +69,7 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	existingMetric, exists := storage.GetMetricsByID(metricName)
+	existingMetric, exists := storage.GetMetricsByID(metricName, metricType)
 	if exists {
 		switch existingMetric.MType {
 		case models.Counter:
@@ -78,8 +80,12 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 			}
 			fmt.Printf("Counter value: %d\r\n", *existingMetric.Delta)
 		case models.Gauge:
-			existingMetric.Value = &value
-			fmt.Printf("Gauge value: %d\r\n", *existingMetric.Value)
+			if existingMetric.Value == nil {
+				existingMetric.Value = &value
+			} else {
+				*existingMetric.Value = value
+			}
+			fmt.Printf("Gauge value: %f\r\n", *existingMetric.Value)
 		}
 
 	} else {

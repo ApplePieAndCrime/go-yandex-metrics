@@ -26,20 +26,26 @@ func (s *MemStorage) AddMetrics(metrics Metrics) {
 	s.MetricsList = append(s.MetricsList, metrics)
 }
 
-func (s *MemStorage) GetMetricsByID(id string) (Metrics, bool) {
-	for _, m := range s.MetricsList {
-		if m.ID == id {
-			return m, true
+func (s *MemStorage) GetMetricsByID(id string, mType string) (*Metrics, bool) {
+	for i, m := range s.MetricsList {
+		if id == m.ID && mType == m.MType {
+			return &s.MetricsList[i], true
 		}
 	}
-	return Metrics{}, false
+	return nil, false
 }
 
 func NewMetrics(metricName string, metricType string, delta int64, value float64) Metrics {
-	return Metrics{
+	m := Metrics{
 		ID:    metricName,
 		MType: metricType,
-		Delta: &delta,
-		Value: &value,
 	}
+	switch metricType {
+	case Counter:
+		m.Delta = &delta
+	case Gauge:
+		m.Value = &value
+	}
+
+	return m
 }
