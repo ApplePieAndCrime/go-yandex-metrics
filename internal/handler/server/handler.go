@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
@@ -19,6 +20,8 @@ func Init() {
 }
 
 func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
+	polInterval := 2
+	time.Sleep(time.Duration(polInterval) * time.Second)
 	w.Header().Set("Content-Type", "text/plain")
 
 	if req.Method != http.MethodPost {

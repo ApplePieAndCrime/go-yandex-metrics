@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler"
+	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 )
 
 func main() {
