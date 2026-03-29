@@ -1,39 +1,43 @@
 package handler_test
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/agent"
+	agent_handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/agent"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestGetMetrics(t *testing.T) {
+func TestSendRequestToServer(t *testing.T) {
 
 	tests := []struct {
-		name      string
-		method    string
-		url       string
-		resStatus int
+		name       string
+		method     string
+		url        string
+		statusCode int
 	}{
 		{
-			name:      "валидный запрос",
-			method:    http.MethodGet,
-			url:       "/",
-			resStatus: http.StatusOK,
+			name:       "валидный запрос",
+			url:        "/update/counter/test/100",
+			statusCode: http.StatusOK,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := httptest.NewRequest(tt.method, tt.url, nil)
-			w := httptest.NewRecorder()
-			handler.GetMetrics(w, request)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer ts.Close()
 
-			result := w.Result()
-			fmt.Printf("result: %+v\n", result)
-			assert.Equal(t, tt.resStatus, result.StatusCode)
+			client := ts.Client()
+
+			resp, err, statusCode := agent_handler.SendRequestToServer(client, ts.URL, "counter", "test", "100")
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tt.statusCode, statusCode)
 		})
 	}
 }

@@ -8,62 +8,102 @@ import (
 	"time"
 )
 
-func Init() {
-	http.HandleFunc("/", GetMetrics)
+var pollCount int64 = 2
+
+type AgentMetrics struct {
+	PollCount   int64
+	MemStats    runtime.MemStats
+	RandomValue float64
 }
 
-func GetMetrics(w http.ResponseWriter, req *http.Request) {
-	var m runtime.MemStats
-	polInterval := 2
-	reportInterval := 10
-	runtime.ReadMemStats(&m)
+func RunAgent() {
+	pollInterval := 2 * time.Second
+	reportInterval := 10 * time.Second
+
 	client := &http.Client{
 		Timeout: time.Duration(reportInterval) * time.Second,
 	}
 
-	// for gauge
-	gaugeMetrics := map[string]float64{
-		"Alloc":         float64(m.Alloc),
-		"BuckHashSys":   float64(m.BuckHashSys),
-		"Frees":         float64(m.Frees),
-		"GCCPUFraction": float64(m.GCCPUFraction),
-		"GCSys":         float64(m.GCSys),
-		"HeapAlloc":     float64(m.HeapAlloc),
-		"HeapInuse":     float64(m.HeapInuse),
-		"HeapObjects":   float64(m.HeapObjects),
-		"HeapReleased":  float64(m.HeapReleased),
-		"LastGC":        float64(m.LastGC),
-		"Lookups":       float64(m.Lookups),
-		"MCacheInuse":   float64(m.MCacheInuse),
-		"MCacheSys":     float64(m.MCacheSys),
-		"MSpanInuse":    float64(m.MSpanInuse),
-		"MSpanSys":      float64(m.MSpanSys),
-		"Mallocs":       float64(m.Mallocs),
-		"NextGC":        float64(m.NextGC),
-		"NumForcedGC":   float64(m.NumForcedGC),
-		"NumGC":         float64(m.NumGC),
-		"OtherSys":      float64(m.OtherSys),
-		"PauseTotalNs":  float64(m.PauseTotalNs),
-		"StackInuse":    float64(m.StackInuse),
-		"StackSys":      float64(m.StackSys),
-		"Sys":           float64(m.Sys),
-		"TotalAlloc":    float64(m.TotalAlloc),
-	}
-	for metricName, metricValue := range gaugeMetrics {
-		SendRequestToServer(*client, "gauge", metricName, fmt.Sprintf("%f", metricValue))
-	}
+	pollTicker := time.NewTicker(pollInterval)
+	reportTicker := time.NewTicker(reportInterval)
+	defer pollTicker.Stop()
+	defer reportTicker.Stop()
 
-	SendRequestToServer(*client, "counter", "PollCount", fmt.Sprintf("%d", polInterval))
-	SendRequestToServer(*client, "gauge", "RandomValue", fmt.Sprintf("%d", rand.Intn(100)))
+	metrics := &AgentMetrics{}
 
+	for {
+		select {
+		case <-pollTicker.C:
+			// собрать метрики
+			runtime.ReadMemStats(&metrics.MemStats)
+			metrics.PollCount++
+			metrics.RandomValue = rand.Float64()
+			fmt.Println("metrics collected")
+
+		case <-reportTicker.C:
+			// отправить метрики
+			sendAllMetrics(client, "http://localhost:8080", metrics)
+			fmt.Println("metrics sent")
+		}
+	}
 }
 
-func SendRequestToServer(client http.Client, metricType string, metricName string, metricValue string) {
-	url := fmt.Sprintf("http://localhost:8080/update/%s/%s/%s", metricType, metricName, metricValue)
-	_, err := client.Post(url, "text/plain", nil)
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]string, []string) {
+
+	memMetrics := map[string]struct {
+		Type  string
+		Value string
+	}{
+		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
+		"BuckHashSys":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.BuckHashSys)},
+		"Frees":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Frees)},
+		"GCCPUFraction": {Type: "gauge", Value: fmt.Sprintf("%f", metrics.MemStats.GCCPUFraction)},
+		"GCSys":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.GCSys)},
+		"HeapAlloc":     {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapAlloc)},
+		"HeapInuse":     {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapInuse)},
+		"HeapObjects":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapObjects)},
+		"HeapReleased":  {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapReleased)},
+		"LastGC":        {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.LastGC)},
+		"Lookups":       {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Lookups)},
+		"MCacheInuse":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.MCacheInuse)},
+		"MCacheSys":     {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.MCacheSys)},
+		"MSpanInuse":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.MSpanInuse)},
+		"MSpanSys":      {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.MSpanSys)},
+		"Mallocs":       {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Mallocs)},
+		"NextGC":        {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.NextGC)},
+		"NumForcedGC":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.NumForcedGC)},
+		"NumGC":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.NumGC)},
+		"OtherSys":      {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.OtherSys)},
+		"PauseTotalNs":  {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.PauseTotalNs)},
+		"StackInuse":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.StackInuse)},
+		"StackSys":      {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.StackSys)},
+		"Sys":           {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Sys)},
+		"TotalAlloc":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.TotalAlloc)},
+		"RandomValue":   {Type: "gauge", Value: fmt.Sprintf("%f", metrics.RandomValue)},
+		"PollCount":     {Type: "counter", Value: fmt.Sprintf("%d", metrics.PollCount)},
+	}
+	resBody := []string{}
+	errors := []string{}
+	for metricName, metric := range memMetrics {
+		resp, err, _ := SendRequestToServer(client, baseUrl, metric.Type, metricName, metric.Value)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Error sending mem metric %s: %v\n", metricName, err))
+			continue
+		}
+
+		resBody = append(resBody, fmt.Sprintf("%v", resp))
+		resp.Body.Close()
+	}
+	pollCount++
+	return resBody, errors
+}
+
+func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, error, int) {
+	url := fmt.Sprintf("%s/update/%s/%s/%s", baseUrl, metricType, metricName, metricValue)
+	resp, err := client.Post(url, "text/plain", nil)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil, err, http.StatusInternalServerError
 	}
-	return
+	return resp, nil, resp.StatusCode
 }
