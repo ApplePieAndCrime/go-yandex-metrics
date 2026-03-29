@@ -23,11 +23,11 @@ test-iter1:
             -binary-path=cmd/server/server
 
 test-iter2: 
-	make agent-build \
+	make agent-build 
 	./metricstest -test.v -test.run=^TestIteration2[AB]*$$ -source-path=./ -agent-binary-path=cmd/agent/agent
 
 test-iter3:
-	make app-build \
+	make app-build 
 	./metricstest -test.v -test.run=^TestIteration3[AB]*$ \
         -source-path=. \
         -agent-binary-path=cmd/agent/agent \
