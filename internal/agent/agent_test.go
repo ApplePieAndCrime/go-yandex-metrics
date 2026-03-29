@@ -1,11 +1,11 @@
-package handler_test
+package internal_agent_test
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	agent_handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/agent"
+	agent "github.com/ApplePieAndCrime/go-yandex-metrics/internal/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +33,7 @@ func TestSendRequestToServer(t *testing.T) {
 
 			client := ts.Client()
 
-			resp, err, statusCode := agent_handler.SendRequestToServer(client, ts.URL, "counter", "test", "100")
+			resp, err, statusCode := agent.SendRequestToServer(client, ts.URL, "counter", "test", "100")
 			require.NoError(t, err)
 			defer resp.Body.Close()
 

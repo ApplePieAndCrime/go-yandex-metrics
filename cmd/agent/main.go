@@ -1,9 +1,9 @@
 package main
 
 import (
-	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/agent"
+	internal_agent "github.com/ApplePieAndCrime/go-yandex-metrics/internal/agent"
 )
 
 func main() {
-	handler.RunAgent()
+	internal_agent.RunAgent()
 }
