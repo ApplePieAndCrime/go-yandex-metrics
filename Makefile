@@ -2,6 +2,9 @@ server-build:
 	go build -o ./cmd/server ./cmd/server
 agent-build:
 	go build -o ./cmd/agent ./cmd/agent
+app-build:
+	make server-build
+	make agent-build
 
 server-run:
 	go run ./cmd/server/main.go
