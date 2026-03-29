@@ -5,5 +5,6 @@ import (
 )
 
 func main() {
-	internal_agent.RunAgent()
+	parseFlags()
+	internal_agent.RunAgent(&flagExternalAddress, &flagPollInterval, &flagReportInterval)
 }

@@ -8,24 +8,22 @@ import (
 	"time"
 )
 
-var pollCount int64 = 2
-
 type AgentMetrics struct {
 	PollCount   int64
 	MemStats    runtime.MemStats
 	RandomValue float64
 }
 
-func RunAgent() {
-	pollInterval := 2 * time.Second
-	reportInterval := 10 * time.Second
+func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) {
+	currentPollInterval := time.Duration(*pollCount) * time.Second
+	currentReportInterval := time.Duration(*reportInterval) * time.Second
 
 	client := &http.Client{
-		Timeout: time.Duration(reportInterval) * time.Second,
+		Timeout: currentReportInterval * time.Second,
 	}
 
-	pollTicker := time.NewTicker(pollInterval)
-	reportTicker := time.NewTicker(reportInterval)
+	pollTicker := time.NewTicker(currentPollInterval)
+	reportTicker := time.NewTicker(currentReportInterval)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
@@ -42,7 +40,7 @@ func RunAgent() {
 
 		case <-reportTicker.C:
 			// отправить метрики
-			sendAllMetrics(client, "http://localhost:8080", metrics)
+			sendAllMetrics(client, *externalAddress, metrics)
 			fmt.Println("metrics sent")
 		}
 	}
@@ -94,7 +92,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 		resBody = append(resBody, fmt.Sprintf("%v", resp))
 		resp.Body.Close()
 	}
-	pollCount++
+
 	return resBody, errors
 }
 
