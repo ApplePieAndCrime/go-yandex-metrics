@@ -7,9 +7,9 @@ app-build:
 	make agent-build
 
 server-run:
-	go run ./cmd/server/main.go
+	go run ./cmd/server
 agent-run:
-	go run ./cmd/agent/main.go
+	go run ./cmd/agent
 
 server-test:
 	go test -v ./internal/handler/server
