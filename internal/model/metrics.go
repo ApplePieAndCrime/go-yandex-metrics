@@ -35,6 +35,10 @@ func (s *MemStorage) GetMetricsByID(id string, mType string) (*Metrics, bool) {
 	return nil, false
 }
 
+func (s *MemStorage) GetAllMetrics() []Metrics {
+	return s.MetricsList
+}
+
 func NewMetrics(metricName string, metricType string, delta int64, value float64) Metrics {
 	m := Metrics{
 		ID:    metricName,

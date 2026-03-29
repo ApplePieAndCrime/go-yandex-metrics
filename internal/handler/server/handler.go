@@ -2,26 +2,64 @@ package handler
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
+	"github.com/go-chi/chi"
 )
 
 var storage models.MemStorage
 
-func Init() {
+func Init() *chi.Mux {
 	repositoryResponse := repository.Init()
 	storage = repositoryResponse.Storage
-	http.HandleFunc("/update/", UpdateMetrics)
+	r := chi.NewRouter()
+	r.Route("/", func(r chi.Router) {
+		r.Get("/", GetAllMetrics)
+		r.Get("/value/{metricType}/{metricName}", GetMetricsByID)
+		r.Post("/update/{metricType}/{metricName}/{metricValue}", UpdateMetrics)
+	})
+
+	return r
+}
+
+func GetAllMetrics(w http.ResponseWriter, req *http.Request) {
+	metricsList := storage.GetAllMetrics()
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/html")
+
+	for _, metric := range metricsList {
+		io.WriteString(w, fmt.Sprintf("%+v\n", metric))
+	}
+}
+
+func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
+	metricName := chi.URLParam(req, "metricName")
+	metricType := chi.URLParam(req, "metricType")
+
+	if metricName == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	existingMetric, exists := storage.GetMetricsByID(metricName, metricType)
+
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	// w.Write([]byte(fmt.Sprintf("%+v", existingMetric)))
+	io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
 }
 
 func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
-	polInterval := 2
-	time.Sleep(time.Duration(polInterval) * time.Second)
 	w.Header().Set("Content-Type", "text/plain")
 
 	if req.Method != http.MethodPost {
@@ -90,10 +128,11 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 			}
 			fmt.Printf("Gauge value: %f\r\n", *existingMetric.Value)
 		}
-
+		io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
 	} else {
 		newMetrics := models.NewMetrics(metricName, metricType, delta, value)
 		storage.AddMetrics(newMetrics)
+		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
 	}
 
 	fmt.Printf("storage: %+v\r\n", storage.MetricsList)

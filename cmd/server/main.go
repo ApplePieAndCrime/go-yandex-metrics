@@ -7,9 +7,9 @@ import (
 )
 
 func main() {
-	handler.Init()
+	routes := handler.Init()
 
-	err := http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", routes)
 	if err != nil {
 		panic(err)
 	}
