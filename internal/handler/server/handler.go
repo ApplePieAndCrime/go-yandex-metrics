@@ -55,8 +55,12 @@ func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "text/plain")
-	// w.Write([]byte(fmt.Sprintf("%+v", existingMetric)))
-	io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
+	switch existingMetric.MType {
+	case models.Counter:
+		io.WriteString(w, fmt.Sprintf("%d", *existingMetric.Delta))
+	case models.Gauge:
+		io.WriteString(w, fmt.Sprintf("%f", *existingMetric.Value))
+	}
 }
 
 func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
