@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi"
 )
 
-var storage models.MemStorage
+var storage models.Storage = &models.MemStorage{}
 
 func Init(repository repository.RepositoryResponse) *chi.Mux {
 	storage = repository.Storage
@@ -128,7 +128,7 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
 	}
 
-	fmt.Printf("storage: %+v\r\n", storage.MetricsList)
+	fmt.Printf("storage: %+v\r\n", storage.GetAllMetrics())
 
 	w.WriteHeader(http.StatusOK)
 }

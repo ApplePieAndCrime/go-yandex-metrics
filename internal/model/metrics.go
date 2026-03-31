@@ -18,6 +18,12 @@ type Metrics struct {
 	Hash  string   `json:"hash,omitempty"`
 }
 
+type Storage interface {
+	AddMetrics(metrics Metrics)
+	GetMetricsByID(id string, mType string) (*Metrics, bool)
+	GetAllMetrics() []Metrics
+}
+
 type MemStorage struct {
 	MetricsList []Metrics
 }

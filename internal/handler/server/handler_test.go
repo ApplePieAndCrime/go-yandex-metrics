@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,8 +36,8 @@ func TestGUpdateMetrics(t *testing.T) {
 			method: http.MethodGet,
 			url:    "/update/counter/test/100",
 			want: want{
-				code:        http.StatusNotFound,
-				contentType: "text/plain",
+				code:        http.StatusMethodNotAllowed,
+				contentType: "",
 			},
 		},
 		{
@@ -51,9 +52,10 @@ func TestGUpdateMetrics(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			router := handler.Init(repository.Init())
 			request := httptest.NewRequest(tt.method, tt.url, nil)
 			w := httptest.NewRecorder()
-			handler.UpdateMetrics(w, request)
+			router.ServeHTTP(w, request)
 
 			result := w.Result()
 			assert.Equal(t, tt.want.code, result.StatusCode)

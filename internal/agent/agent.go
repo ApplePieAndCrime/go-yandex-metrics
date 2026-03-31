@@ -85,7 +85,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	resBody := []string{}
 	errors := []string{}
 	for metricName, metric := range memMetrics {
-		resp, err, _ := SendRequestToServer(client, baseUrl, metric.Type, metricName, metric.Value)
+		resp, _, err := SendRequestToServer(client, baseUrl, metric.Type, metricName, metric.Value)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("Error sending mem metric %s: %v\n", metricName, err))
 			continue
