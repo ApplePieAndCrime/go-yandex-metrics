@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
@@ -14,9 +13,8 @@ import (
 
 var storage models.MemStorage
 
-func Init() *chi.Mux {
-	repositoryResponse := repository.Init()
-	storage = repositoryResponse.Storage
+func Init(repository repository.RepositoryResponse) *chi.Mux {
+	storage = repository.Storage
 	r := chi.NewRouter()
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", GetAllMetrics)
@@ -30,8 +28,8 @@ func Init() *chi.Mux {
 func GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 	metricsList := storage.GetAllMetrics()
 
-	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
 
 	for _, metric := range metricsList {
 		io.WriteString(w, fmt.Sprintf("%+v\n", metric))
@@ -39,6 +37,7 @@ func GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 }
 
 func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
 	metricName := chi.URLParam(req, "metricName")
 	metricType := chi.URLParam(req, "metricType")
 
@@ -54,7 +53,6 @@ func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "text/plain")
 	switch existingMetric.MType {
 	case models.Counter:
 		io.WriteString(w, strconv.FormatInt(*existingMetric.Delta, 10))
@@ -70,23 +68,14 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	// массив вида ["", "update", "counter", "test", "100"]
-	paths := strings.Split(req.URL.Path, "/")
 
-	if len(paths) != 5 || paths[1] != "update" {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	fmt.Printf("paths: %v\r\n", paths)
-
-	metricType := paths[2]
-	metricName := paths[3]
-	metricValue := paths[4]
+	metricType := chi.URLParam(req, "metricType")
+	metricName := chi.URLParam(req, "metricName")
+	metricValue := chi.URLParam(req, "metricValue")
 
 	fmt.Printf("metricType: %s metricName: %s metricValue: %s\r\n", metricType, metricName, metricValue)
 
-	if metricName == "" {
+	if metricType == "" || metricName == "" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

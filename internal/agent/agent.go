@@ -19,7 +19,7 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 	currentReportInterval := time.Duration(*reportInterval) * time.Second
 
 	client := &http.Client{
-		Timeout: currentReportInterval * time.Second,
+		Timeout: currentReportInterval,
 	}
 
 	pollTicker := time.NewTicker(currentPollInterval)
@@ -58,9 +58,11 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 		"GCCPUFraction": {Type: "gauge", Value: fmt.Sprintf("%f", metrics.MemStats.GCCPUFraction)},
 		"GCSys":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.GCSys)},
 		"HeapAlloc":     {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapAlloc)},
+		"HeapIdle":      {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapIdle)},
 		"HeapInuse":     {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapInuse)},
 		"HeapObjects":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapObjects)},
 		"HeapReleased":  {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapReleased)},
+		"HeapSys":       {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.HeapSys)},
 		"LastGC":        {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.LastGC)},
 		"Lookups":       {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Lookups)},
 		"MCacheInuse":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.MCacheInuse)},
@@ -96,12 +98,12 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, errors
 }
 
-func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, error, int) {
+func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/update/%s/%s/%s", baseUrl, metricType, metricName, metricValue)
 	resp, err := client.Post(url, "text/plain", nil)
 	if err != nil {
 		fmt.Println(err)
-		return nil, err, http.StatusInternalServerError
+		return nil, http.StatusInternalServerError, err
 	}
-	return resp, nil, resp.StatusCode
+	return resp, resp.StatusCode, nil
 }

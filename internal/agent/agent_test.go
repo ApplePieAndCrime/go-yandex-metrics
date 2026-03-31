@@ -33,7 +33,7 @@ func TestSendRequestToServer(t *testing.T) {
 
 			client := ts.Client()
 
-			resp, err, statusCode := agent.SendRequestToServer(client, ts.URL, "counter", "test", "100")
+			resp, statusCode, err := agent.SendRequestToServer(client, ts.URL, "counter", "test", "100")
 			require.NoError(t, err)
 			defer resp.Body.Close()
 
