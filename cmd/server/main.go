@@ -20,7 +20,9 @@ func main() {
 func RunServer() error {
 	repositoryResponse := repository.Init()
 	routes := handler.Init(repositoryResponse)
+
 	fmt.Println("Server is running on address: " + flagRunAddress)
+
 	err := http.ListenAndServe(flagRunAddress, routes)
 	return err
 }
