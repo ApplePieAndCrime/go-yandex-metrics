@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi"
 )
 
-var storage models.Storage = &models.MemStorage{}
+var storage repository.Storage
 
-func Init(repository repository.RepositoryResponse) *chi.Mux {
+func Init(repository *repository.Repository) *chi.Mux {
 	storage = repository.Storage
 	r := chi.NewRouter()
 	r.Route("/", func(r chi.Router) {
@@ -123,7 +123,7 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		}
 		io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
 	} else {
-		newMetrics := models.NewMetrics(metricName, metricType, delta, value)
+		newMetrics := storage.NewMetrics(metricName, metricType, delta, value)
 		storage.AddMetrics(newMetrics)
 		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
 	}
