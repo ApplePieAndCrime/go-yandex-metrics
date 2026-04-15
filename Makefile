@@ -18,7 +18,7 @@ agent-test:
 
 # тесты для тасок
 test-iter1:
-	make server-build /
+	make server-build 
 	./metricstest -test.v -test.run=^TestIteration1$ \
             -binary-path=cmd/server/server
 
@@ -35,10 +35,16 @@ test-iter3:
 
 test-iter4:
 	make app-build 
-	SERVER_PORT=8083 
-	ADDRESS="localhost:8083" 
-	TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration4$ \
+	SERVER_PORT=8083 ADDRESS="localhost:8083" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration4$ \
 		-agent-binary-path=cmd/agent/agent \
         -binary-path=cmd/server/server \
         -server-port=8083 \
         -source-path=.
+
+test-iter5:
+	make app-build
+	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration5$ \
+    	-agent-binary-path=cmd/agent/agent \
+    	-binary-path=cmd/server/server \
+    	-server-port=8084 \
+    	-source-path=.

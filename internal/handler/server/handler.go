@@ -121,14 +121,14 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 			}
 			fmt.Printf("Gauge value: %f\r\n", *existingMetric.Value)
 		}
+		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
 	} else {
 		newMetrics := storage.NewMetrics(metricName, metricType, delta, value)
 		storage.AddMetrics(newMetrics)
+		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
 	}
 
 	fmt.Printf("storage: %+v\r\n", storage.GetAllMetrics())
-
-	w.WriteHeader(http.StatusOK)
 }
