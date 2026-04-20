@@ -6,9 +6,11 @@ import (
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
+	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 )
 
 func main() {
+	logger.LoggerInitialize()
 	parseFlags()
 
 	err := RunServer()

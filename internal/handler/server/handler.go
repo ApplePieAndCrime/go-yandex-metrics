@@ -8,6 +8,7 @@ import (
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
+	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	"github.com/go-chi/chi"
 )
 
@@ -17,9 +18,9 @@ func Init(repository *repository.Repository) *chi.Mux {
 	storage = repository.Storage
 	r := chi.NewRouter()
 	r.Route("/", func(r chi.Router) {
-		r.Get("/", GetAllMetrics)
-		r.Get("/value/{metricType}/{metricName}", GetMetricsByID)
-		r.Post("/update/{metricType}/{metricName}/{metricValue}", UpdateMetrics)
+		r.Get("/", logger.WithLogging(GetAllMetrics))
+		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(GetMetricsByID))
+		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(UpdateMetrics))
 	})
 
 	return r
