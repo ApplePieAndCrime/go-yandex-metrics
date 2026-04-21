@@ -27,7 +27,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", logger.WithLogging(h.GetAllMetrics))
 		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
-		r.Post("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
+		r.Get("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
 		r.Post("/update", logger.WithLogging(h.UpdateMetricsByJSON))
 	})
@@ -210,11 +210,13 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	case models.Counter:
 		if metrics.Delta == nil {
 			w.WriteHeader(http.StatusBadRequest)
+			fmt.Println("metrics: ", metrics, "metrics delta:", *metrics.Delta)
 			return
 		}
 	case models.Gauge:
 		if metrics.Value == nil {
 			w.WriteHeader(http.StatusBadRequest)
+			fmt.Println("metrics: ", metrics, "metrics value:", *metrics.Value)
 			return
 		}
 	}

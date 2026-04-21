@@ -35,32 +35,32 @@ test-iter3:
 
 test-iter4:
 	make app-build 
-	SERVER_PORT=8083 ADDRESS="localhost:8083" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration4$ \
+	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration4$ \
 		-agent-binary-path=cmd/agent/agent \
         -binary-path=cmd/server/server \
-        -server-port=8083 \
+        -server-port=8084 \
         -source-path=.
 
 test-iter5:
-	make app-build
-	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration5$ \
-    	-agent-binary-path=cmd/agent/agent \
-    	-binary-path=cmd/server/server \
-    	-server-port=8084 \
+	make app-build 
+	SERVER_PORT=8085 ADDRESS="localhost:8085" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration4$ \
+		-agent-binary-path=cmd/agent/agent \
+        -binary-path=cmd/server/server \
+    	-server-port=8085 \
     	-source-path=.
 
 test-iter6:
 	make app-build
-	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration6$ \
+	SERVER_PORT=8086 ADDRESS="localhost:8086" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration6$ \
         -agent-binary-path=cmd/agent/agent \
         -binary-path=cmd/server/server \
-        -server-port=8084 \
+        -server-port=8086 \
         -source-path=.
 
 test-iter7:
 	make app-build
-	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration7$ \
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration7$ \
         -agent-binary-path=cmd/agent/agent \
         -binary-path=cmd/server/server \
-        -server-port=8084 \
+        -server-port=8080 \
         -source-path=.
