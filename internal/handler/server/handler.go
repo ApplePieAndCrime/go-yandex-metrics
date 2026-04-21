@@ -27,7 +27,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", logger.WithLogging(h.GetAllMetrics))
 		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
-		r.Get("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
+		r.Post("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
 		r.Post("/update", logger.WithLogging(h.UpdateMetricsByJSON))
 	})
