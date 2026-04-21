@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -17,6 +18,12 @@ type AgentMetrics struct {
 	PollCount   int64
 	MemStats    runtime.MemStats
 	RandomValue float64
+}
+
+func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
+	runtime.ReadMemStats(&metrics.MemStats)
+	metrics.PollCount++
+	metrics.RandomValue = randomFloat()
 }
 
 func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) {
@@ -33,21 +40,24 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 	defer reportTicker.Stop()
 
 	metrics := &AgentMetrics{}
+	var mu sync.RWMutex
 
-	for {
-		select {
-		case <-pollTicker.C:
-			// собрать метрики
-			runtime.ReadMemStats(&metrics.MemStats)
-			metrics.PollCount++
-			metrics.RandomValue = rand.Float64()
+	go func() {
+		for range pollTicker.C {
+			mu.Lock()
+			collectMetrics(metrics, rand.Float64)
+			mu.Unlock()
 			fmt.Println("metrics collected")
-
-		case <-reportTicker.C:
-			// отправить метрики
-			sendAllMetrics(client, *externalAddress, metrics)
-			fmt.Println("metrics sent")
 		}
+	}()
+
+	for range reportTicker.C {
+		mu.RLock()
+		snapshot := *metrics
+		mu.RUnlock()
+
+		sendAllMetrics(client, *externalAddress, &snapshot)
+		fmt.Println("metrics sent")
 	}
 }
 
