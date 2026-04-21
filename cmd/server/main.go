@@ -7,6 +7,7 @@ import (
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 )
 
 func main() {
@@ -20,8 +21,11 @@ func main() {
 }
 
 func RunServer() error {
-	repositoryResponse := repository.Init()
-	routes := handler.Init(repositoryResponse)
+	repos := repository.NewRepository()
+	services := service.NewService(repos)
+	handlers := handler.NewHandler(services)
+
+	routes := handlers.InitRoutes()
 
 	fmt.Println("Server is running on address: " + flagRunAddress)
 

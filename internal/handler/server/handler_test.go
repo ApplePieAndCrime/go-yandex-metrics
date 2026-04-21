@@ -7,20 +7,30 @@ import (
 	"testing"
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
+	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
 )
 
+func newTestRouter() http.Handler {
+	repo := repository.NewRepository()
+	repo.Storage.AddMetrics(repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
+
+	services := service.NewService(repo)
+	handlers := handler.NewHandler(services)
+
+	return handlers.InitRoutes()
+}
+
 func TestGetAllMetrics(t *testing.T) {
-	repo := repository.Init()
-	repo.Storage.AddMetrics(repo.Storage.NewMetrics("testCounter", "counter", 10, 0))
-	handler.Init(repo)
+	logger.LoggerInitialize()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	handler.GetAllMetrics(w, req)
+	newTestRouter().ServeHTTP(w, req)
 
 	res := w.Result()
 	body, _ := io.ReadAll(res.Body)
@@ -44,7 +54,7 @@ func TestGetMetricsByID(t *testing.T) {
 		want   want
 	}{
 		{
-			name:   "валидный тест",
+			name:   "valid request",
 			method: http.MethodGet,
 			url:    "/value/counter/testCounter",
 			want: want{
@@ -54,7 +64,7 @@ func TestGetMetricsByID(t *testing.T) {
 			},
 		},
 		{
-			name:   "неправильный метод",
+			name:   "wrong method",
 			method: http.MethodPost,
 			url:    "/value/counter/testCounter",
 			want: want{
@@ -64,7 +74,7 @@ func TestGetMetricsByID(t *testing.T) {
 			},
 		},
 		{
-			name:   "metricName не существует",
+			name:   "unknown metric",
 			method: http.MethodGet,
 			url:    "/value/counter/testCounter2",
 			want: want{
@@ -74,27 +84,25 @@ func TestGetMetricsByID(t *testing.T) {
 			},
 		},
 	}
-	logger.LoggerInitialize()
 
-	repo := repository.Init()
-	repo.Storage.AddMetrics(repo.Storage.NewMetrics("testCounter", "counter", 10, 0))
+	logger.LoggerInitialize()
+	router := newTestRouter()
 
 	for _, tt := range tests {
-		req := httptest.NewRequest(tt.method, tt.url, nil)
-		w := httptest.NewRecorder()
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.url, nil)
+			w := httptest.NewRecorder()
 
-		router := handler.Init(repo)
-		router.ServeHTTP(w, req)
+			router.ServeHTTP(w, req)
 
-		res := w.Result()
-		body, _ := io.ReadAll(res.Body)
+			res := w.Result()
+			body, _ := io.ReadAll(res.Body)
 
-		assert.Equal(t, tt.want.code, res.StatusCode)
-		assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
-		assert.Contains(t, tt.want.body, string(body))
-
+			assert.Equal(t, tt.want.code, res.StatusCode)
+			assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
+			assert.Contains(t, string(body), tt.want.body)
+		})
 	}
-
 }
 
 func TestUpdateMetrics(t *testing.T) {
@@ -110,7 +118,7 @@ func TestUpdateMetrics(t *testing.T) {
 		want   want
 	}{
 		{
-			name:   "валидный запрос",
+			name:   "valid request",
 			method: http.MethodPost,
 			url:    "/update/counter/test/100",
 			want: want{
@@ -119,7 +127,7 @@ func TestUpdateMetrics(t *testing.T) {
 			},
 		},
 		{
-			name:   "неправильный метод",
+			name:   "wrong method",
 			method: http.MethodGet,
 			url:    "/update/counter/test/100",
 			want: want{
@@ -128,7 +136,7 @@ func TestUpdateMetrics(t *testing.T) {
 			},
 		},
 		{
-			name:   "неправильный метод",
+			name:   "invalid counter value",
 			method: http.MethodPost,
 			url:    "/update/counter/test/100.2",
 			want: want{
@@ -139,14 +147,13 @@ func TestUpdateMetrics(t *testing.T) {
 	}
 
 	logger.LoggerInitialize()
-
-	repo := repository.Init()
-	router := handler.Init(repo)
+	router := newTestRouter()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.url, nil)
 			w := httptest.NewRecorder()
+
 			router.ServeHTTP(w, req)
 
 			result := w.Result()

@@ -1,33 +1,42 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
-	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/go-chi/chi"
 )
 
-var storage repository.Storage
+type Handler struct {
+	services *service.Service
+}
 
-func Init(repository *repository.Repository) *chi.Mux {
-	storage = repository.Storage
+func NewHandler(services *service.Service) *Handler {
+	return &Handler{services: services}
+}
+
+func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
 	r.Route("/", func(r chi.Router) {
-		r.Get("/", logger.WithLogging(GetAllMetrics))
-		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(GetMetricsByID))
-		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(UpdateMetrics))
+		r.Get("/", logger.WithLogging(h.GetAllMetrics))
+		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
+		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByIDWithJSON))
+		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
+		r.Post("/update", logger.WithLogging(h.UpdateMetricsByJSON))
 	})
 
 	return r
 }
 
-func GetAllMetrics(w http.ResponseWriter, req *http.Request) {
-	metricsList := storage.GetAllMetrics()
+func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
+	metricsList := h.services.GetAllMetrics()
 
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
@@ -37,7 +46,7 @@ func GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	metricName := chi.URLParam(req, "metricName")
 	metricType := chi.URLParam(req, "metricType")
@@ -46,7 +55,7 @@ func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetric, exists := storage.GetMetricsByID(metricName, metricType)
+	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
 
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
@@ -62,7 +71,45 @@ func GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var metrics models.Metrics
+	var buf bytes.Buffer
+	// читаем тело запроса
+	_, err := buf.ReadFrom(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// десериализуем JSON в Visitor
+	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
+		fmt.Println("err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if metrics.ID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	resp, err := json.Marshal(existingMetric)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(resp)
+}
+
+func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
 	if req.Method != http.MethodPost {
@@ -104,32 +151,71 @@ func UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	existingMetric, exists := storage.GetMetricsByID(metricName, metricType)
+	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
 	if exists {
-		switch existingMetric.MType {
-		case models.Counter:
-			if existingMetric.Delta == nil {
-				existingMetric.Delta = &delta
-			} else {
-				*existingMetric.Delta += delta
-			}
-			fmt.Printf("Counter value: %d\r\n", *existingMetric.Delta)
-		case models.Gauge:
-			if existingMetric.Value == nil {
-				existingMetric.Value = &value
-			} else {
-				*existingMetric.Value = value
-			}
-			fmt.Printf("Gauge value: %f\r\n", *existingMetric.Value)
+		h.services.UpdateMetrics(existingMetric, delta, value)
+		w.WriteHeader(http.StatusOK)
+
+		resp, err := json.Marshal(existingMetric)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+
+		w.Write(resp)
+	} else {
+		newMetrics := h.services.CreateMetrics(metricName, metricType, delta, value)
+		w.WriteHeader(http.StatusOK)
+
+		resp, err := json.Marshal(newMetrics)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write(resp)
+	}
+
+	fmt.Printf("storage: %+v\r\n", h.services.GetAllMetrics())
+}
+
+func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var metrics models.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if metrics.MType == "" || metrics.ID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	if metrics.MType != models.Counter && metrics.MType != models.Gauge {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	if exists {
+		h.services.UpdateMetrics(existingMetric, *metrics.Delta, *metrics.Value)
 		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
 	} else {
-		newMetrics := storage.NewMetrics(metricName, metricType, delta, value)
-		storage.AddMetrics(newMetrics)
+		newMetrics := h.services.CreateMetrics(metrics.ID, metrics.MType, *metrics.Delta, *metrics.Value)
 		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
 	}
 
-	fmt.Printf("storage: %+v\r\n", storage.GetAllMetrics())
+	fmt.Printf("storage: %+v\r\n", h.services.GetAllMetrics())
 }

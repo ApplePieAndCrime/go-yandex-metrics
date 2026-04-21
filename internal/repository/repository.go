@@ -13,7 +13,7 @@ type Repository struct {
 	Storage
 }
 
-func Init() *Repository {
+func NewRepository() *Repository {
 	storage := &models.MemStorage{
 		MetricsList: []models.Metrics{},
 	}

@@ -1,6 +1,7 @@
 package internal_agent
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -100,7 +101,12 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 
 func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/update/%s/%s/%s", baseUrl, metricType, metricName, metricValue)
-	resp, err := client.Post(url, "text/plain", nil)
+	resp, err := client.Post(
+		url,
+		"application/json",
+		bytes.NewBufferString(fmt.Sprintf(`{"id":%s,"type":%s,"value":%s}`, metricName, metricType, metricValue)),
+	)
+
 	if err != nil {
 		fmt.Println(err)
 		return nil, http.StatusInternalServerError, err
