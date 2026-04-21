@@ -210,13 +210,11 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	case models.Counter:
 		if metrics.Delta == nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Println("metrics: ", metrics, "metrics delta:", *metrics.Delta)
 			return
 		}
 	case models.Gauge:
 		if metrics.Value == nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Println("metrics: ", metrics, "metrics value:", *metrics.Value)
 			return
 		}
 	}
@@ -228,9 +226,11 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 
 		if metrics.Delta != nil {
 			delta = *metrics.Delta
+			fmt.Println("metrics: ", metrics, "metrics delta:", *metrics.Delta)
 		}
 		if metrics.Value != nil {
 			value = *metrics.Value
+			fmt.Println("metrics: ", metrics, "metrics value:", *metrics.Value)
 		}
 
 		h.services.UpdateMetrics(existingMetric, delta, value)
