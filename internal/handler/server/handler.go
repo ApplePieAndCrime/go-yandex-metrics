@@ -27,7 +27,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", logger.WithLogging(h.GetAllMetrics))
 		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
-		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByIDWithJSON))
+		r.Post("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
 		r.Post("/update", logger.WithLogging(h.UpdateMetricsByJSON))
 	})
@@ -206,16 +206,64 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	switch metrics.MType {
+	case models.Counter:
+		if metrics.Delta == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	case models.Gauge:
+		if metrics.Value == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
 	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
 	if exists {
-		h.services.UpdateMetrics(existingMetric, *metrics.Delta, *metrics.Value)
+		var delta int64
+		var value float64
+
+		if metrics.Delta != nil {
+			delta = *metrics.Delta
+		}
+		if metrics.Value != nil {
+			value = *metrics.Value
+		}
+
+		h.services.UpdateMetrics(existingMetric, delta, value)
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, fmt.Sprintf("%+v", existingMetric))
-	} else {
-		newMetrics := h.services.CreateMetrics(metrics.ID, metrics.MType, *metrics.Delta, *metrics.Value)
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, fmt.Sprintf("%+v", newMetrics))
+
+		resp, err := json.Marshal(existingMetric)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write(resp)
+		return
 	}
+
+	var delta int64
+	var value float64
+
+	if metrics.Delta != nil {
+		delta = *metrics.Delta
+	}
+	if metrics.Value != nil {
+		value = *metrics.Value
+	}
+
+	newMetrics := h.services.CreateMetrics(metrics.ID, metrics.MType, delta, value)
+	w.WriteHeader(http.StatusOK)
+
+	resp, err := json.Marshal(newMetrics)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(resp)
 
 	fmt.Printf("storage: %+v\r\n", h.services.GetAllMetrics())
 }

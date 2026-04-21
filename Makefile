@@ -60,7 +60,7 @@ test-iter6:
 test-iter7:
 	make app-build
 	SERVER_PORT=8084 ADDRESS="localhost:8084" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration7$ \
-         -agent-binary-path=cmd/agent/agent \
+        -agent-binary-path=cmd/agent/agent \
         -binary-path=cmd/server/server \
         -server-port=8084 \
         -source-path=.

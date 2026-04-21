@@ -2,11 +2,15 @@ package internal_agent
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"runtime"
+	"strconv"
 	"time"
+
+	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
 type AgentMetrics struct {
@@ -100,11 +104,39 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 }
 
 func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
-	url := fmt.Sprintf("%s/update/%s/%s/%s", baseUrl, metricType, metricName, metricValue)
+	url := fmt.Sprintf("%s/update", baseUrl)
+
+	payload := models.Metrics{
+		ID:    metricName,
+		MType: metricType,
+	}
+
+	switch metricType {
+	case models.Counter:
+		delta, err := strconv.ParseInt(metricValue, 10, 64)
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		payload.Delta = &delta
+	case models.Gauge:
+		value, err := strconv.ParseFloat(metricValue, 64)
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		payload.Value = &value
+	default:
+		return nil, http.StatusBadRequest, fmt.Errorf("unsupported metric type: %s", metricType)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
 	resp, err := client.Post(
 		url,
 		"application/json",
-		bytes.NewBufferString(fmt.Sprintf(`{"id":%s,"type":%s,"value":%s}`, metricName, metricType, metricValue)),
+		bytes.NewBuffer(body),
 	)
 
 	if err != nil {
