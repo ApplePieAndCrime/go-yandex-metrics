@@ -22,7 +22,7 @@ func TestSendRequestToServer(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			assert.Equal(t, http.MethodPost, r.Method)
-			assert.Equal(t, "/update", r.URL.Path)
+			assert.Equal(t, "/update/", r.URL.Path)
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, err := io.ReadAll(r.Body)

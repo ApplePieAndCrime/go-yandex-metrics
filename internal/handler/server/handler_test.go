@@ -107,6 +107,62 @@ func TestGetMetricsByID(t *testing.T) {
 	}
 }
 
+func TestGetMetricsByIDByJSON(t *testing.T) {
+	type want struct {
+		code int
+	}
+
+	tests := []struct {
+		name string
+		body models.Metrics
+		want want
+	}{
+		{
+			name: "get existing counter",
+			body: models.Metrics{
+				ID:    "testCounter",
+				MType: models.Counter,
+			},
+			want: want{code: http.StatusOK},
+		},
+		{
+			name: "get unknown gauge",
+			body: models.Metrics{
+				ID:    "jsonGauge",
+				MType: models.Gauge,
+			},
+			want: want{code: http.StatusNotFound},
+		},
+		{
+			name: "invalid counter without MType",
+			body: models.Metrics{
+				ID: "jsonCounter",
+			},
+			want: want{code: http.StatusNotFound},
+		},
+	}
+
+	logger.LoggerInitialize()
+	router := newTestRouter()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.body)
+			assert.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			result := w.Result()
+			assert.Equal(t, tt.want.code, result.StatusCode)
+			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
+		})
+	}
+}
+
 func TestUpdateMetrics(t *testing.T) {
 	type want struct {
 		code        int
@@ -211,7 +267,7 @@ func TestUpdateMetricsByJSON(t *testing.T) {
 			body, err := json.Marshal(tt.body)
 			assert.NoError(t, err)
 
-			req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 

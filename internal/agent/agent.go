@@ -114,7 +114,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 }
 
 func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
-	url := fmt.Sprintf("%s/update", baseUrl)
+	url := fmt.Sprintf("%s/update/", baseUrl)
 
 	payload := models.Metrics{
 		ID:    metricName,

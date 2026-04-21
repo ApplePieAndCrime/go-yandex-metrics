@@ -27,9 +27,9 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", logger.WithLogging(h.GetAllMetrics))
 		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
-		r.Post("/value", logger.WithLogging(h.GetMetricsByIDWithJSON))
+		r.Post("/value/", logger.WithLogging(h.GetMetricsByIDWithJSON))
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
-		r.Post("/update", logger.WithLogging(h.UpdateMetricsByJSON))
+		r.Post("/update/", logger.WithLogging(h.UpdateMetricsByJSON))
 	})
 
 	return r
@@ -78,16 +78,20 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 	// читаем тело запроса
 	_, err := buf.ReadFrom(req.Body)
 	if err != nil {
+		logger.Sugar.Errorln("buffer err: ", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// десериализуем JSON в Visitor
 	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
-		fmt.Println("err", err)
+		logger.Sugar.Errorln("unmarshal err: ", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if metrics.ID == "" {
+
+	logger.Sugar.Infoln("metrics: ", metrics, metrics.ID, metrics.MType)
+
+	if metrics.MType == "" || metrics.ID == "" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
