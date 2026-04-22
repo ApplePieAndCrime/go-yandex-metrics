@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"runtime"
@@ -114,20 +115,23 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, errors
 }
 
-func Compress(body []byte) (*bytes.Buffer, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+func Unzip(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
 
-	_, err := gz.Write(body)
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
-
-	if err = gz.Close(); err != nil {
-		return nil, err
-	}
-
-	return &buf, nil
+	return body, nil
 }
 
 func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
@@ -160,18 +164,13 @@ func SendRequestToServer(client *http.Client, baseUrl string, metricType string,
 		return nil, http.StatusInternalServerError, err
 	}
 
-	zipBuffer, err := Compress(body)
-	if err != nil {
-		return nil, http.StatusInternalServerError, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, zipBuffer)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := client.Do(req)
 
@@ -179,5 +178,15 @@ func SendRequestToServer(client *http.Client, baseUrl string, metricType string,
 		fmt.Println(err)
 		return nil, http.StatusInternalServerError, err
 	}
+
+	defer resp.Body.Close()
+
+	out, err := Unzip(resp)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+
 	return resp, resp.StatusCode, nil
 }

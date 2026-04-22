@@ -27,7 +27,6 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(logger.WithLogging)
 	r.Use(zipper.ZipMiddleware)
-	r.Use(zipper.UnzipMiddleware)
 
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", h.GetAllMetrics)

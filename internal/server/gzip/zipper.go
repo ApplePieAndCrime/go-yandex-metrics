@@ -24,10 +24,12 @@ func ZipMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		w.Header().Set("Content-Encoding", "gzip")
 		// создаём gzip.Writer поверх текущего w
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
 			io.WriteString(w, err.Error())
+			next.ServeHTTP(w, r)
 			return
 		}
 		defer gz.Close()
@@ -36,34 +38,4 @@ func ZipMiddleware(next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(zipFn)
-}
-
-func UnzipMiddleware(next http.Handler) http.Handler {
-	unzipFn := func(w http.ResponseWriter, r *http.Request) {
-
-		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// создаём gzip.Writer поверх текущего w
-		gz, err := gzip.NewReader(r.Body)
-		if err != nil {
-			io.WriteString(w, err.Error())
-			return
-		}
-
-		defer gz.Close()
-
-		body, err := io.ReadAll(gz)
-		if err != nil {
-			io.WriteString(w, err.Error())
-			return
-		}
-
-		r.Body = io.NopCloser(strings.NewReader(string(body)))
-		next.ServeHTTP(w, r)
-	}
-
-	return http.HandlerFunc(unzipFn)
 }
