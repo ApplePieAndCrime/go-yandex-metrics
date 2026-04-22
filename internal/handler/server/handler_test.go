@@ -19,7 +19,7 @@ import (
 func newTestRouter() http.Handler {
 	logger.LoggerInitialize()
 	repo := repository.NewRepository()
-	repo.Storage.AddMetrics(repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
+	repo.Storage.AddMetrics(*repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
 
 	services := service.NewService(repo)
 	handlers := handler.NewHandler(services)

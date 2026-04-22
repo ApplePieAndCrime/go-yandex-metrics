@@ -6,7 +6,7 @@ type Storage interface {
 	GetMetricsByID(id string, mType string) (*models.Metrics, bool)
 	AddMetrics(metrics models.Metrics)
 	GetAllMetrics() []models.Metrics
-	NewMetrics(metricName string, metricType string, delta int64, value float64) models.Metrics
+	NewMetrics(metricName string, metricType string, delta int64, value float64) *models.Metrics
 }
 
 type Repository struct {

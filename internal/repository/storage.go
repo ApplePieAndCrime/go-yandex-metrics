@@ -27,7 +27,7 @@ func (s *StorageRepository) GetAllMetrics() []models.Metrics {
 	return s.Storage.MetricsList
 }
 
-func (s *StorageRepository) NewMetrics(metricName string, metricType string, delta int64, value float64) models.Metrics {
+func (s *StorageRepository) NewMetrics(metricName string, metricType string, delta int64, value float64) *models.Metrics {
 	m := models.Metrics{
 		ID:    metricName,
 		MType: metricType,
@@ -39,5 +39,5 @@ func (s *StorageRepository) NewMetrics(metricName string, metricType string, del
 		m.Value = &value
 	}
 
-	return m
+	return &m
 }
