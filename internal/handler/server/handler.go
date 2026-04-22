@@ -111,7 +111,7 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 
-	resp, err := json.Marshal(existingMetric)
+	resp, err := json.Marshal(*existingMetric)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -186,8 +186,6 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 		w.Write(resp)
 	}
-
-	fmt.Printf("storage: %+v\r\n", h.services.GetAllMetrics())
 }
 
 func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) {
@@ -280,6 +278,4 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	}
 
 	w.Write(resp)
-
-	fmt.Printf("storage: %+v\r\n", h.services.GetAllMetrics())
 }

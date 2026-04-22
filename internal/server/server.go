@@ -61,7 +61,6 @@ func RunServer(services service.Service, storeInterval int64, fileStoragePath st
 			fmt.Errorf("producer: can't open file: %w", err)
 		}
 
-		fmt.Println("storageMetricsList: ", storageMetricsList)
 		if err := producer.WriteEvent(storageMetricsList); err != nil {
 			fmt.Errorf("producer write error: %w", err)
 		}

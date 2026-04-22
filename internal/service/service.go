@@ -1,8 +1,6 @@
 package service
 
 import (
-	"fmt"
-
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 )
@@ -31,14 +29,12 @@ func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, val
 		} else {
 			*existingMetric.Delta += delta
 		}
-		fmt.Printf("Counter value: %d\r\n", *existingMetric.Delta)
 	case models.Gauge:
 		if existingMetric.Value == nil {
 			existingMetric.Value = &value
 		} else {
 			*existingMetric.Value = value
 		}
-		fmt.Printf("Gauge value: %f\r\n", *existingMetric.Value)
 	}
 	return existingMetric
 }

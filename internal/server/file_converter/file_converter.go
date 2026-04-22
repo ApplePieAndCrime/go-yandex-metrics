@@ -2,7 +2,6 @@ package file_converter
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -61,7 +60,6 @@ func (c *Consumer) ReadMetricsList() ([]models.Metrics, error) {
 	if err := c.decoder.Decode(&metricsList); err != nil {
 		return nil, err
 	}
-	fmt.Println("metricsList: ", metricsList)
 	return metricsList, nil
 }
 
