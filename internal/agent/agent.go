@@ -2,6 +2,7 @@ package internal_agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -113,6 +114,22 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, errors
 }
 
+func Compress(body []byte) (*bytes.Buffer, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	_, err := gz.Write(body)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = gz.Close(); err != nil {
+		return nil, err
+	}
+
+	return &buf, nil
+}
+
 func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/update/", baseUrl)
 
@@ -143,11 +160,20 @@ func SendRequestToServer(client *http.Client, baseUrl string, metricType string,
 		return nil, http.StatusInternalServerError, err
 	}
 
-	resp, err := client.Post(
-		url,
-		"application/json",
-		bytes.NewBuffer(body),
-	)
+	zipBuffer, err := Compress(body)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, zipBuffer)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := client.Do(req)
 
 	if err != nil {
 		fmt.Println(err)

@@ -6,7 +6,7 @@ import (
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
-	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 )
 

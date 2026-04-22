@@ -9,7 +9,8 @@ import (
 	"strconv"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
-	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	zipper "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/gzip"
+	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/go-chi/chi"
 )
@@ -24,12 +25,16 @@ func NewHandler(services *service.Service) *Handler {
 
 func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
+	r.Use(logger.WithLogging)
+	r.Use(zipper.ZipMiddleware)
+	r.Use(zipper.UnzipMiddleware)
+
 	r.Route("/", func(r chi.Router) {
-		r.Get("/", logger.WithLogging(h.GetAllMetrics))
-		r.Get("/value/{metricType}/{metricName}", logger.WithLogging(h.GetMetricsByID))
-		r.Post("/value/", logger.WithLogging(h.GetMetricsByIDWithJSON))
-		r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.WithLogging(h.UpdateMetrics))
-		r.Post("/update/", logger.WithLogging(h.UpdateMetricsByJSON))
+		r.Get("/", h.GetAllMetrics)
+		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
+		r.Post("/value/", h.GetMetricsByIDWithJSON)
+		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
+		r.Post("/update/", h.UpdateMetricsByJSON)
 	})
 
 	return r

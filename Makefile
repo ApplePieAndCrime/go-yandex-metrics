@@ -64,3 +64,11 @@ test-iter7:
         -binary-path=cmd/server/server \
         -server-port=8080 \
         -source-path=.
+
+test-iter8:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="hello.txt" ./metricstest -test.v -test.run=^TestIteration8$ \
+        -agent-binary-path=cmd/agent/agent \
+        -binary-path=cmd/server/server \
+        -server-port=8080 \
+        -source-path=.

@@ -1,4 +1,4 @@
-package internal
+package logger
 
 import (
 	"net/http"
@@ -20,7 +20,7 @@ func LoggerInitialize() {
 	Sugar = *logger.Sugar()
 }
 
-func WithLogging(h http.HandlerFunc) http.HandlerFunc {
+func WithLogging(next http.Handler) http.Handler {
 	logFn := func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -29,8 +29,6 @@ func WithLogging(h http.HandlerFunc) http.HandlerFunc {
 		// метод запроса
 		method := r.Method
 
-		h.ServeHTTP(w, r)
-
 		duration := time.Since(start)
 
 		Sugar.Infoln(
@@ -38,6 +36,8 @@ func WithLogging(h http.HandlerFunc) http.HandlerFunc {
 			"method", method,
 			"duration", duration,
 		)
+
+		next.ServeHTTP(w, r)
 	}
-	return logFn
+	return http.HandlerFunc(logFn)
 }

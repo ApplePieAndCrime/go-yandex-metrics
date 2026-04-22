@@ -11,12 +11,13 @@ import (
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
-	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
+	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
 )
 
 func newTestRouter() http.Handler {
+	logger.LoggerInitialize()
 	repo := repository.NewRepository()
 	repo.Storage.AddMetrics(repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
 
@@ -27,7 +28,6 @@ func newTestRouter() http.Handler {
 }
 
 func TestGetAllMetrics(t *testing.T) {
-	logger.LoggerInitialize()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -87,7 +87,6 @@ func TestGetMetricsByID(t *testing.T) {
 		},
 	}
 
-	logger.LoggerInitialize()
 	router := newTestRouter()
 
 	for _, tt := range tests {
@@ -142,7 +141,6 @@ func TestGetMetricsByIDByJSON(t *testing.T) {
 		},
 	}
 
-	logger.LoggerInitialize()
 	router := newTestRouter()
 
 	for _, tt := range tests {
@@ -204,7 +202,6 @@ func TestUpdateMetrics(t *testing.T) {
 		},
 	}
 
-	logger.LoggerInitialize()
 	router := newTestRouter()
 
 	for _, tt := range tests {
@@ -259,7 +256,6 @@ func TestUpdateMetricsByJSON(t *testing.T) {
 		},
 	}
 
-	logger.LoggerInitialize()
 	router := newTestRouter()
 
 	for _, tt := range tests {
