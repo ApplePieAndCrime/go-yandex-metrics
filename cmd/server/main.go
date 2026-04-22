@@ -30,7 +30,7 @@ func RunServer() error {
 
 	fmt.Println("Server is running on address: " + flagRunAddress)
 
-	server.RunServer(*services, flagInterval, flagStoragePath, flagRestore)
+	go server.RunServer(*services, flagInterval, flagStoragePath, flagRestore)
 
 	err := http.ListenAndServe(flagRunAddress, routes)
 	return err

@@ -81,6 +81,9 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 	var buf bytes.Buffer
 	// читаем тело запроса
 	_, err := buf.ReadFrom(req.Body)
+
+	defer req.Body.Close()
+
 	if err != nil {
 		logger.Sugar.Errorln("buffer err: ", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -194,6 +197,9 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	var buf bytes.Buffer
 
 	_, err := buf.ReadFrom(req.Body)
+
+	defer req.Body.Close()
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

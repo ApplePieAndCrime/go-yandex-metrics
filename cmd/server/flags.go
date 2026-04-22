@@ -16,7 +16,7 @@ func parseFlags() {
 	flag.StringVar(&flagRunAddress, "a", "localhost:8080", "адрес для старта сервера")
 	flag.Int64Var(&flagInterval, "i", 300, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
 	flag.StringVar(&flagStoragePath, "f", "storage.json", "путь до файла, куда сохраняются текущие значения")
-	flag.BoolVar(&flagRestore, "r", false, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
+	flag.BoolVar(&flagRestore, "r", true, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
 
 	flag.Parse()
 

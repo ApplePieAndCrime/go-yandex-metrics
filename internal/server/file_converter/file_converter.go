@@ -15,7 +15,7 @@ type Producer struct {
 
 func NewProducer(filename string) (*Producer, error) {
 	// откройте файл и создайте для него json.Encoder
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0666)
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		return nil, err
 	}
