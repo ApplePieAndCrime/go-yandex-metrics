@@ -29,13 +29,13 @@ func (h Handler) InitRoutes() *chi.Mux {
 	r.Use(zipper.ZipMiddleware)
 
 	r.Route("/", func(r chi.Router) {
-		r.Get("/", h.GetAllMetrics)
 		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
-		r.Post("/value", h.GetMetricsByIDWithJSON)
 		r.Post("/value/", h.GetMetricsByIDWithJSON)
+		r.Post("/value", h.GetMetricsByIDWithJSON)
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
 		r.Post("/update/", h.UpdateMetricsByJSON)
 		r.Post("/update", h.UpdateMetricsByJSON)
+		r.Get("/", h.GetAllMetrics)
 	})
 
 	return r
@@ -98,14 +98,16 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	logger.Sugar.Infoln("metrics: ", metrics, metrics.ID, metrics.MType)
+	logger.Sugar.Infoln("metrics: ", metrics)
 
 	if metrics.MType == "" || metrics.ID == "" {
+		fmt.Println("test error")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
-
+	existingMetrics, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	fmt.Println("exists", exists)
+	fmt.Println("existingMetric", existingMetrics)
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -113,7 +115,7 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 
-	resp, err := json.Marshal(*existingMetric)
+	resp, err := json.Marshal(*existingMetrics)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

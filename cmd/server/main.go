@@ -30,7 +30,8 @@ func RunServer() error {
 
 	fmt.Println("Server is running on address: " + flagRunAddress)
 
-	go server.RunServer(*services, flagInterval, flagStoragePath, flagRestore)
+	// Запускаем фоновое сохранение метрик ДО HTTP-сервера
+	go server.SaveMetricsToFile(*services, flagInterval, flagStoragePath, flagRestore)
 
 	err := http.ListenAndServe(flagRunAddress, routes)
 	return err

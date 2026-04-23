@@ -23,7 +23,7 @@ import (
 // 	return &metrics, nil
 // }
 
-func RunServer(services service.Service, storeInterval int64, fileStoragePath string, isRestore bool) {
+func SaveMetricsToFile(services service.Service, storeInterval int64, fileStoragePath string, isRestore bool) {
 	logger.Sugar.Infof("work with file %s started by interval %d", fileStoragePath, storeInterval)
 
 	intervalTicker := time.NewTicker(time.Duration(storeInterval) * time.Second)
