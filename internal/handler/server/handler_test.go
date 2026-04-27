@@ -17,12 +17,12 @@ import (
 )
 
 func newTestRouter() http.Handler {
-	logger.LoggerInitialize()
+	loggerSugar := logger.LoggerInitialize()
 	repo := repository.NewRepository()
 	repo.Storage.AddMetrics(*repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services)
+	handlers := handler.NewHandler(services, loggerSugar)
 
 	return handlers.InitRoutes()
 }
