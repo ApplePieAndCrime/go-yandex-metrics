@@ -5,37 +5,55 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
 type Producer struct {
-	file    *os.File
-	encoder *json.Encoder
+	filename string
 }
 
 func NewProducer(filename string) (*Producer, error) {
-	// откройте файл и создайте для него json.Encoder
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		return nil, err
-	}
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-
 	return &Producer{
-		file:    file,
-		encoder: encoder,
+		filename: filename,
 	}, nil
 }
 
 func (p *Producer) WriteEvent(metricsList []models.Metrics) error {
-	return p.encoder.Encode(metricsList)
+	dir := filepath.Dir(p.filename)
+	pattern := filepath.Base(p.filename) + ".tmp-*"
+
+	tempFile, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return err
+	}
+
+	tempFilename := tempFile.Name()
+	defer os.Remove(tempFilename)
+
+	encoder := json.NewEncoder(tempFile)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(metricsList); err != nil {
+		tempFile.Close()
+		return err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		return err
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tempFilename, p.filename)
 }
 
 func (p *Producer) Close() error {
-	return p.file.Close()
+	return nil
 }
 
 type Consumer struct {
