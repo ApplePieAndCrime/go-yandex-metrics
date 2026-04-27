@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"runtime"
@@ -28,12 +29,18 @@ func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
 	metrics.RandomValue = randomFloat()
 }
 
-func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) {
+func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) error {
+	// Даём серверу время на запуск (2 секунды достаточно)
+	time.Sleep(2 * time.Second)
+
 	currentPollInterval := time.Duration(*pollCount) * time.Second
 	currentReportInterval := time.Duration(*reportInterval) * time.Second
 
 	client := &http.Client{
 		Timeout: currentReportInterval,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
 	}
 
 	pollTicker := time.NewTicker(currentPollInterval)
@@ -49,7 +56,7 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 			mu.Lock()
 			collectMetrics(metrics, rand.Float64)
 			mu.Unlock()
-			fmt.Println("metrics collected")
+			log.Println("metrics collected")
 		}
 	}()
 
@@ -58,9 +65,19 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 		snapshot := *metrics
 		mu.RUnlock()
 
-		sendAllMetrics(client, *externalAddress, &snapshot)
-		fmt.Println("metrics sent")
+		// Отправка с повторными попытками
+		for attempt := 0; attempt < 3; attempt++ {
+			_, errs := sendAllMetrics(client, *externalAddress, &snapshot)
+			if len(errs) == 0 {
+				break
+			}
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			}
+		}
+		log.Println("metrics sent")
 	}
+	return nil
 }
 
 func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]string, []string) {
@@ -175,7 +192,7 @@ func SendRequestToServer(client *http.Client, baseUrl string, metricType string,
 	resp, err := client.Do(req)
 
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return nil, http.StatusInternalServerError, err
 	}
 

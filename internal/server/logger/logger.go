@@ -7,9 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var Sugar zap.SugaredLogger
-
-func LoggerInitialize() {
+func LoggerInitialize() zap.SugaredLogger {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		panic(err)
@@ -17,27 +15,58 @@ func LoggerInitialize() {
 
 	defer logger.Sync()
 
-	Sugar = *logger.Sugar()
+	return *logger.Sugar()
 }
 
-func WithLogging(next http.Handler) http.Handler {
-	logFn := func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+type responseData struct {
+	http.ResponseWriter
+	status int
+	size   int
+}
 
-		// эндпоинт /ping
-		uri := r.RequestURI
-		// метод запроса
-		method := r.Method
+func (r *responseData) WriteHeader(statusCode int) {
+	r.status = statusCode
+	r.ResponseWriter.WriteHeader(statusCode)
+}
 
-		duration := time.Since(start)
-
-		Sugar.Infoln(
-			"uri", uri,
-			"method", method,
-			"duration", duration,
-		)
-
-		next.ServeHTTP(w, r)
+func (r *responseData) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
 	}
-	return http.HandlerFunc(logFn)
+
+	n, err := r.ResponseWriter.Write(b)
+	r.size += n
+	return n, err
+}
+
+func WithLogging(logger zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		logFn := func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			respData := &responseData{
+				ResponseWriter: w,
+				status:         0,
+				size:           0,
+			}
+
+			next.ServeHTTP(respData, r)
+
+			if respData.status == 0 {
+				respData.status = http.StatusOK
+			}
+			duration := time.Since(start)
+
+			logger.Infoln(
+				"uri", r.RequestURI,
+				"method", r.Method,
+				"status", respData.status,
+				"size", respData.size,
+				"duration", duration,
+			)
+
+		}
+		return http.HandlerFunc(logFn)
+	}
+
 }

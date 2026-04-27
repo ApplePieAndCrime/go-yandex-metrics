@@ -10,22 +10,24 @@ import (
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	zipper "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/gzip"
-	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
+	loggerMiddleware "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/go-chi/chi"
+	"go.uber.org/zap"
 )
 
 type Handler struct {
 	services *service.Service
+	logger   *zap.SugaredLogger
 }
 
-func NewHandler(services *service.Service) *Handler {
-	return &Handler{services: services}
+func NewHandler(services *service.Service, logger zap.SugaredLogger) *Handler {
+	return &Handler{services: services, logger: logger.With("component", "handler")}
 }
 
 func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
-	r.Use(logger.WithLogging)
+	r.Use(loggerMiddleware.WithLogging(*h.logger))
 	r.Use(zipper.ZipMiddleware)
 
 	r.Route("/", func(r chi.Router) {
@@ -87,18 +89,18 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 	defer req.Body.Close()
 
 	if err != nil {
-		logger.Sugar.Errorln("buffer err: ", err)
+		h.logger.Errorln("buffer err: ", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// десериализуем JSON в Visitor
 	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
-		logger.Sugar.Errorln("unmarshal err: ", err)
+		h.logger.Errorln("unmarshal err: ", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	logger.Sugar.Infoln("metrics: ", metrics)
+	h.logger.Infoln("metrics: ", metrics)
 
 	if metrics.MType == "" || metrics.ID == "" {
 		fmt.Println("test error")

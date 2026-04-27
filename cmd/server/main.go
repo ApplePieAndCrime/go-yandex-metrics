@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
@@ -9,30 +9,38 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"go.uber.org/zap"
 )
 
 func main() {
-	logger.LoggerInitialize()
-	parseFlags()
+	loggerSugar := logger.LoggerInitialize()
+	flagConfig, err := parseFlags()
 
-	err := RunServer()
+	log.Println("SERVER CONFIG ", flagConfig)
+
+	err = RunServer(*flagConfig, loggerSugar)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
-func RunServer() error {
+func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 	repos := repository.NewRepository()
 	services := service.NewService(repos)
-	handlers := handler.NewHandler(services)
+	handlers := handler.NewHandler(services, loggerSugar)
 
 	routes := handlers.InitRoutes()
 
-	fmt.Println("Server is running on address: " + flagRunAddress)
+	log.Println("Server is running on address: " + flagConfig.RunAddress)
 
 	// Запускаем фоновое сохранение метрик ДО HTTP-сервера
-	go server.SaveMetricsToFile(*services, flagInterval, flagStoragePath, flagRestore)
+	errCh := server.SaveMetricsToFile(*services, flagConfig.Interval, flagConfig.StoragePath, flagConfig.IsRestore)
+	go func() {
+		if err := <-errCh; err != nil {
+			log.Println("save metrics error:", err)
+		}
+	}()
 
-	err := http.ListenAndServe(flagRunAddress, routes)
+	err := http.ListenAndServe(flagConfig.RunAddress, routes)
 	return err
 }

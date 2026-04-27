@@ -2,42 +2,60 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"log"
 	"os"
 	"strconv"
+
+	"github.com/caarlos0/env/v11"
 )
 
-var flagRunAddress string
-var flagInterval int64
-var flagStoragePath string
-var flagRestore bool
+type FlagConfig struct {
+	RunAddress  string `env:"ADDRESS"`
+	Interval    int64  `env:"STORE_INTERVAL"`
+	StoragePath string `env:"FILE_STORAGE_PATH"`
+	IsRestore   bool   `env:"RESTORE"`
+}
 
-func parseFlags() {
-	flag.StringVar(&flagRunAddress, "a", "localhost:8080", "адрес для старта сервера")
-	flag.Int64Var(&flagInterval, "i", 300, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
-	flag.StringVar(&flagStoragePath, "f", "storage.json", "путь до файла, куда сохраняются текущие значения")
-	flag.BoolVar(&flagRestore, "r", true, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
+func parseFlags() (*FlagConfig, error) {
+	var cfg FlagConfig
+
+	err := env.Parse(&cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("SERVER CONFIG ", cfg)
+
+	if cfg.RunAddress != "" {
+		cfg.RunAddress = cfg.RunAddress
+	} else {
+		flag.StringVar(&cfg.RunAddress, "a", "localhost:8080", "адрес для старта сервера")
+	}
+
+	if cfg.Interval != 0 {
+		cfg.Interval = cfg.Interval
+	} else {
+		flag.Int64Var(&cfg.Interval, "i", 300, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
+	}
+
+	if cfg.StoragePath != "" {
+		cfg.StoragePath = cfg.StoragePath
+	} else {
+		flag.StringVar(&cfg.StoragePath, "f", "storage.json", "путь до файла, куда сохраняются текущие значения")
+	}
+
+	if value, ok := os.LookupEnv("RESTORE"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, err
+		} else {
+			cfg.IsRestore = parsed
+		}
+	} else {
+		flag.BoolVar(&cfg.IsRestore, "r", true, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
+	}
 
 	flag.Parse()
 
-	if address := os.Getenv("ADDRESS"); address != "" {
-		flagRunAddress = address
-	}
-	if interval := os.Getenv("STORE_INTERVAL"); interval != "" {
-		flag, err := strconv.ParseInt(interval, 10, 64)
-		if err != nil {
-			fmt.Println("STORE_INTERVAL not valid number")
-		}
-		flagInterval = flag
-	}
-	if storagePath := os.Getenv("FILE_STORAGE_PATH"); storagePath != "" {
-		flagStoragePath = storagePath
-	}
-	if isRestore := os.Getenv("RESTORE"); isRestore != "" {
-		flag, err := strconv.ParseBool(isRestore)
-		if err != nil {
-			fmt.Println("RESTORE not valid bool")
-		}
-		flagRestore = flag
-	}
+	return &cfg, nil
 }
