@@ -2,6 +2,8 @@ package file_converter
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -58,6 +60,9 @@ func NewConsumer(filename string) (*Consumer, error) {
 func (c *Consumer) ReadMetricsList() ([]models.Metrics, error) {
 	var metricsList []models.Metrics
 	if err := c.decoder.Decode(&metricsList); err != nil {
+		if errors.Is(err, io.EOF) {
+			return []models.Metrics{}, nil
+		}
 		return nil, err
 	}
 	return metricsList, nil
