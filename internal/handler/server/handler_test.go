@@ -22,7 +22,7 @@ func newTestRouter() http.Handler {
 	repo.Storage.AddMetrics(*repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar)
+	handlers := handler.NewHandler(services, loggerSugar, "")
 
 	return handlers.InitRoutes()
 }

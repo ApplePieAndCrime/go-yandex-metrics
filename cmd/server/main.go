@@ -27,7 +27,7 @@ func main() {
 func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 	repos := repository.NewRepository()
 	services := service.NewService(repos)
-	handlers := handler.NewHandler(services, loggerSugar)
+	handlers := handler.NewHandler(services, loggerSugar, flagConfig.DatabaseDsn)
 
 	routes := handlers.InitRoutes()
 

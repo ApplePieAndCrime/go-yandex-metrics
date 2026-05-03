@@ -14,6 +14,7 @@ type FlagConfig struct {
 	Interval    int64  `env:"STORE_INTERVAL"`
 	StoragePath string `env:"FILE_STORAGE_PATH"`
 	IsRestore   bool   `env:"RESTORE"`
+	DatabaseDsn string `env:"DATABASE_DSN"`
 }
 
 func parseFlags() (*FlagConfig, error) {

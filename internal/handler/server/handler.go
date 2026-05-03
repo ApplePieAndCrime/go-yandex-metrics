@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,16 +14,18 @@ import (
 	loggerMiddleware "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/go-chi/chi"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 )
 
 type Handler struct {
-	services *service.Service
-	logger   *zap.SugaredLogger
+	services    *service.Service
+	logger      *zap.SugaredLogger
+	databaseDns string
 }
 
-func NewHandler(services *service.Service, logger zap.SugaredLogger) *Handler {
-	return &Handler{services: services, logger: logger.With("component", "handler")}
+func NewHandler(services *service.Service, logger zap.SugaredLogger, databaseDns string) *Handler {
+	return &Handler{services: services, logger: logger.With("component", "handler"), databaseDns: databaseDns}
 }
 
 func (h Handler) InitRoutes() *chi.Mux {
@@ -37,10 +40,31 @@ func (h Handler) InitRoutes() *chi.Mux {
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
 		r.Post("/update/", h.UpdateMetricsByJSON)
 		r.Post("/update", h.UpdateMetricsByJSON)
+		r.Get("/ping", h.Ping)
 		r.Get("/", h.GetAllMetrics)
 	})
 
 	return r
+}
+
+func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
+	db, err := sql.Open("pgx", h.databaseDns)
+	if err != nil {
+		h.logger.Fatalf("database connection error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		h.logger.Fatalf("database ping error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Infoln("Successfully connected to PostgreSQL!")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
