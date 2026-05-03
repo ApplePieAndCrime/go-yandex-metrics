@@ -2,13 +2,20 @@ package repository
 
 import models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 
-type RepositoryResponse struct {
-	Storage models.Storage
+type Storage interface {
+	GetMetricsByID(id string, mType string) (*models.Metrics, bool)
+	AddMetrics(metrics models.Metrics)
+	GetAllMetrics() []models.Metrics
+	NewMetrics(metricName string, metricType string, delta int64, value float64) *models.Metrics
 }
 
-func Init() RepositoryResponse {
+type Repository struct {
+	Storage
+}
+
+func NewRepository() *Repository {
 	storage := &models.MemStorage{
 		MetricsList: []models.Metrics{},
 	}
-	return RepositoryResponse{Storage: storage}
+	return &Repository{Storage: NewStorageRepository(storage)}
 }

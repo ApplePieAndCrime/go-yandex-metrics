@@ -1,11 +1,20 @@
 package internal_agent
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"runtime"
+	"strconv"
+	"sync"
 	"time"
+
+	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
 type AgentMetrics struct {
@@ -14,12 +23,24 @@ type AgentMetrics struct {
 	RandomValue float64
 }
 
-func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) {
+func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
+	runtime.ReadMemStats(&metrics.MemStats)
+	metrics.PollCount++
+	metrics.RandomValue = randomFloat()
+}
+
+func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) error {
+	// Даём серверу время на запуск (2 секунды достаточно)
+	time.Sleep(2 * time.Second)
+
 	currentPollInterval := time.Duration(*pollCount) * time.Second
 	currentReportInterval := time.Duration(*reportInterval) * time.Second
 
 	client := &http.Client{
 		Timeout: currentReportInterval,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
 	}
 
 	pollTicker := time.NewTicker(currentPollInterval)
@@ -28,22 +49,35 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 	defer reportTicker.Stop()
 
 	metrics := &AgentMetrics{}
+	var mu sync.RWMutex
 
-	for {
-		select {
-		case <-pollTicker.C:
-			// собрать метрики
-			runtime.ReadMemStats(&metrics.MemStats)
-			metrics.PollCount++
-			metrics.RandomValue = rand.Float64()
-			fmt.Println("metrics collected")
-
-		case <-reportTicker.C:
-			// отправить метрики
-			sendAllMetrics(client, *externalAddress, metrics)
-			fmt.Println("metrics sent")
+	go func() {
+		for range pollTicker.C {
+			mu.Lock()
+			collectMetrics(metrics, rand.Float64)
+			mu.Unlock()
+			log.Println("metrics collected")
 		}
+	}()
+
+	for range reportTicker.C {
+		mu.RLock()
+		snapshot := *metrics
+		mu.RUnlock()
+
+		// Отправка с повторными попытками
+		for attempt := 0; attempt < 3; attempt++ {
+			_, errs := sendAllMetrics(client, *externalAddress, &snapshot)
+			if len(errs) == 0 {
+				break
+			}
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			}
+		}
+		log.Println("metrics sent")
 	}
+	return nil
 }
 
 func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]string, []string) {
@@ -98,12 +132,78 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, errors
 }
 
-func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
-	url := fmt.Sprintf("%s/update/%s/%s/%s", baseUrl, metricType, metricName, metricValue)
-	resp, err := client.Post(url, "text/plain", nil)
+func Unzip(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
+
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+
+	body, err := io.ReadAll(reader)
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
+	}
+	return body, nil
+}
+
+func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
+	url := fmt.Sprintf("%s/update/", baseUrl)
+
+	payload := models.Metrics{
+		ID:    metricName,
+		MType: metricType,
+	}
+
+	switch metricType {
+	case models.Counter:
+		delta, err := strconv.ParseInt(metricValue, 10, 64)
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		payload.Delta = &delta
+	case models.Gauge:
+		value, err := strconv.ParseFloat(metricValue, 64)
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		payload.Value = &value
+	default:
+		return nil, http.StatusBadRequest, fmt.Errorf("unsupported metric type: %s", metricType)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		log.Println(err)
+		return nil, http.StatusInternalServerError, err
+	}
+
+	defer resp.Body.Close()
+
+	out, err := Unzip(resp)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+
 	return resp, resp.StatusCode, nil
 }
