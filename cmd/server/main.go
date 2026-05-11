@@ -13,6 +13,7 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"go.uber.org/zap"
 )
 
