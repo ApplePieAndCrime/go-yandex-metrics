@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS storage_metrics;
+
+DROP TABLE IF EXISTS storage;
+
+DROP TABLE IF EXISTS metrics;
