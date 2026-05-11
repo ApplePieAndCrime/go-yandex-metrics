@@ -11,8 +11,8 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
-	"github.com/golang-migrate/migrate/database/postgres"
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"go.uber.org/zap"
 )
 
