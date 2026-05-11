@@ -19,13 +19,13 @@ import (
 )
 
 type Handler struct {
-	services    *service.Service
-	logger      *zap.SugaredLogger
-	databaseDns string
+	services *service.Service
+	logger   *zap.SugaredLogger
+	db       *sql.DB
 }
 
-func NewHandler(services *service.Service, logger zap.SugaredLogger, databaseDns string) *Handler {
-	return &Handler{services: services, logger: logger.With("component", "handler"), databaseDns: databaseDns}
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB) *Handler {
+	return &Handler{services: services, logger: logger.With("component", "handler"), db: db}
 }
 
 func (h Handler) InitRoutes() *chi.Mux {
@@ -48,15 +48,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 }
 
 func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
-	db, err := sql.Open("pgx", h.databaseDns)
-	if err != nil {
-		h.logger.Fatalf("database connection error: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	err = db.Ping()
+	err := h.db.Ping()
 	if err != nil {
 		h.logger.Fatalf("database ping error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -68,7 +60,12 @@ func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
-	metricsList := h.services.GetAllMetrics()
+	metricsList, err := h.services.GetAllMetrics()
+	if err != nil {
+		h.logger.Errorln("error fetching all metrics: ", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
@@ -87,11 +84,14 @@ func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metricName, metricType)
 
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -131,10 +131,11 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetrics, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	existingMetrics, exists, err := h.services.GetMetricsByID(metrics.ID, metrics.MType)
 	fmt.Println("exists", exists)
 	fmt.Println("existingMetric", existingMetrics)
-	if !exists {
+
+	if err != nil || !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -192,7 +193,12 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metricName, metricType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if exists {
 		h.services.UpdateMetrics(existingMetric, delta, value)
 		w.WriteHeader(http.StatusOK)
@@ -205,7 +211,11 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 		w.Write(resp)
 	} else {
-		newMetrics := h.services.CreateMetrics(metricName, metricType, delta, value)
+		newMetrics, createErr := h.services.CreateMetrics(metricName, metricType, delta, value)
+		if createErr != nil {
+			http.Error(w, createErr.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 
 		resp, err := json.Marshal(newMetrics)
@@ -261,7 +271,11 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
-	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if exists {
 		var delta int64
 		var value float64
@@ -298,7 +312,13 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		value = *metrics.Value
 	}
 
-	newMetrics := h.services.CreateMetrics(metrics.ID, metrics.MType, delta, value)
+	newMetrics, createErr := h.services.CreateMetrics(metrics.ID, metrics.MType, delta, value)
+
+	if createErr != nil {
+		http.Error(w, createErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 
 	resp, err := json.Marshal(newMetrics)

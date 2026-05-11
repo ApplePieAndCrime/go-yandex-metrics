@@ -29,14 +29,14 @@ func main() {
 	}
 }
 
-func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) {
+func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 	if flagConfig.DatabaseDsn == "" {
-		return
+		return nil
 	}
 	db, err := sql.Open("pgx", flagConfig.DatabaseDsn)
 	if err != nil {
 		loggerSugar.Fatalf("database connection error: %v", err)
-		return
+		return err
 	}
 	defer db.Close()
 
@@ -58,27 +58,44 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) {
 		loggerSugar.Fatalf("Migration up failed: %v", err)
 	}
 	loggerSugar.Infoln("Migration up completed successfully")
+
+	return nil
 }
 
 func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
-	migrateDb(flagConfig, loggerSugar)
 
-	repos := repository.NewRepository()
-	services := service.NewService(repos)
-	handlers := handler.NewHandler(services, loggerSugar, flagConfig.DatabaseDsn)
+	var storage repository.Storage
+	var db *sql.DB
+	var err error
+
+	if flagConfig.DatabaseDsn != "" {
+		db, err = sql.Open("pgx", flagConfig.DatabaseDsn)
+		if err != nil {
+			return err
+		}
+		if err := migrateDb(flagConfig, loggerSugar); err != nil {
+			return err
+		}
+
+		storage = repository.NewPostgresStorage(db)
+	} else {
+		storage = repository.NewMemoryStorage()
+	}
+
+	services := service.NewService(storage)
+	handlers := handler.NewHandler(services, loggerSugar, db)
 
 	routes := handlers.InitRoutes()
 
-	log.Println("Server is running on address: " + flagConfig.RunAddress)
+	if flagConfig.DatabaseDsn == "" {
+		errCh := server.SaveMetricsToFile(*services, flagConfig.Interval, flagConfig.StoragePath, flagConfig.IsRestore)
+		go func() {
+			if err := <-errCh; err != nil {
+				log.Println("save metrics error:", err)
+			}
+		}()
+	}
 
-	// Запускаем фоновое сохранение метрик ДО HTTP-сервера
-	errCh := server.SaveMetricsToFile(*services, flagConfig.Interval, flagConfig.StoragePath, flagConfig.IsRestore)
-	go func() {
-		if err := <-errCh; err != nil {
-			log.Println("save metrics error:", err)
-		}
-	}()
-
-	err := http.ListenAndServe(flagConfig.RunAddress, routes)
-	return err
+	log.Println("Server is running on address:", flagConfig.RunAddress)
+	return http.ListenAndServe(flagConfig.RunAddress, routes)
 }

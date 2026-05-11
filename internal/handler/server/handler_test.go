@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
-	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
+	repository "github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
@@ -18,11 +19,18 @@ import (
 
 func newTestRouter() http.Handler {
 	loggerSugar := logger.LoggerInitialize()
-	repo := repository.NewRepository()
-	repo.Storage.AddMetrics(*repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
+
+	repo := repository.NewMemoryStorage()
+
+	delta := int64(10)
+	repo.SaveMetrics(context.Background(), models.Metrics{
+		ID:    "testCounter",
+		MType: models.Counter,
+		Delta: &delta,
+	})
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar, "")
+	handlers := handler.NewHandler(services, loggerSugar, nil)
 
 	return handlers.InitRoutes()
 }

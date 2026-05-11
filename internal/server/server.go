@@ -42,7 +42,11 @@ func SaveMetricsToFile(
 		defer ticker.Stop()
 
 		for range ticker.C {
-			storageMetricsList := services.GetAllMetrics()
+			storageMetricsList, err := services.GetAllMetrics()
+			if err != nil {
+				errCh <- fmt.Errorf("failed to get all metrics for file: %w", err)
+				return
+			}
 
 			producer, err := file_converter.NewProducer(fileStoragePath)
 			if err != nil {
