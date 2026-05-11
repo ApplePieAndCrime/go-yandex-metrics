@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 
@@ -9,6 +11,8 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"github.com/golang-migrate/migrate/database/postgres"
+	"github.com/golang-migrate/migrate/v4"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +28,37 @@ func main() {
 	}
 }
 
+func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) {
+	db, err := sql.Open("pgx", flagConfig.DatabaseDsn)
+	if err != nil {
+		loggerSugar.Fatalf("database connection error: %v", err)
+		return
+	}
+	defer db.Close()
+
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		loggerSugar.Fatal(err)
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"postgres",
+		driver,
+	)
+	if err != nil {
+		loggerSugar.Fatal(err)
+	}
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		loggerSugar.Fatalf("Migration up failed: %v", err)
+	}
+	loggerSugar.Infoln("Migration up completed successfully")
+}
+
 func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
+	migrateDb(flagConfig, loggerSugar)
+
 	repos := repository.NewRepository()
 	services := service.NewService(repos)
 	handlers := handler.NewHandler(services, loggerSugar, flagConfig.DatabaseDsn)
