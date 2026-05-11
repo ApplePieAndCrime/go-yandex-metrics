@@ -29,6 +29,9 @@ func main() {
 }
 
 func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) {
+	if flagConfig.DatabaseDsn == "" {
+		return
+	}
 	db, err := sql.Open("pgx", flagConfig.DatabaseDsn)
 	if err != nil {
 		loggerSugar.Fatalf("database connection error: %v", err)
