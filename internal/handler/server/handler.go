@@ -349,6 +349,11 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	if len(metricsList) == 0 {
+		http.Error(w, "Пустой массив", http.StatusBadRequest)
+		return
+	}
 	var updatedMetricsList []models.Metrics
 
 	for _, metrics := range metricsList {

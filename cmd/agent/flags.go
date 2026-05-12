@@ -14,29 +14,19 @@ type FlagConfig struct {
 }
 
 func parseFlags() FlagConfig {
-	var cfg FlagConfig
+	cfg := FlagConfig{
+		ExternalAddress: "localhost:8080",
+		PollInterval:    2,
+		ReportInterval:  10,
+	}
 	err := env.Parse(&cfg)
 	if err != nil {
 		panic(err)
 	}
 
-	if cfg.ExternalAddress != "" {
-		cfg.ExternalAddress = cfg.ExternalAddress
-	} else {
-		flag.StringVar(&cfg.ExternalAddress, "a", "localhost:8080", "address and port to send HTTP requests")
-	}
-
-	if cfg.PollInterval != 0 {
-		cfg.PollInterval = cfg.PollInterval
-	} else {
-		flag.Int64Var(&cfg.PollInterval, "p", 2, "poll interval in seconds")
-	}
-
-	if cfg.ReportInterval != 0 {
-		cfg.ReportInterval = cfg.ReportInterval
-	} else {
-		flag.Int64Var(&cfg.ReportInterval, "r", 10, "report interval in seconds")
-	}
+	flag.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "address and port to send HTTP requests")
+	flag.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "poll interval in seconds")
+	flag.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "report interval in seconds")
 
 	flag.Parse()
 

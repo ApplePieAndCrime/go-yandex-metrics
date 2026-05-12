@@ -40,27 +40,7 @@ func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, val
 }
 
 func (s *Service) CreateOrUpdateMetrics(metrics models.Metrics) (*models.Metrics, error) {
-	var d int64
-	var v float64
-
-	// Безопасно извлекаем значения
-	if metrics.Delta != nil {
-		d = *metrics.Delta
-	}
-	if metrics.Value != nil {
-		v = *metrics.Value
-	}
-
-	existingMetric, exists, err := s.GetMetricsByID(metrics.ID, metrics.MType)
-	if err != nil {
-		return nil, err
-	}
-
-	if exists {
-		return s.UpdateMetrics(existingMetric, d, v)
-	} else {
-		return s.CreateMetrics(metrics.ID, metrics.MType, d, v)
-	}
+	return s.storage.SaveMetrics(context.Background(), metrics)
 }
 
 func (s *Service) CreateMetrics(metricName string, metricType string, delta int64, value float64) (*models.Metrics, error) {
