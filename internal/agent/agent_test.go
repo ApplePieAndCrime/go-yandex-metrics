@@ -2,10 +2,13 @@ package internal_agent
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/stretchr/testify/assert"
@@ -127,4 +130,42 @@ func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
 	assert.Equal(t, 0.25, *sent["RandomValue"][0].Value)
 	assert.Equal(t, 0.75, *sent["RandomValue"][1].Value)
 	assert.NotEqual(t, *sent["RandomValue"][0].Value, *sent["RandomValue"][1].Value)
+}
+
+func TestSendAllMetricsWithRetry(t *testing.T) {
+	attempts := 0
+	var sleeps []time.Duration
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts < 4 {
+				return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("temporary connection failure")}
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	metrics := &AgentMetrics{}
+
+	_, err := sendAllMetricsWithRetry(client, "http://example.com", metrics, func(delay time.Duration) {
+		sleeps = append(sleeps, delay)
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 4, attempts)
+	assert.Equal(t, []time.Duration{time.Second, 3 * time.Second, 5 * time.Second}, sleeps)
+}
+
+func TestSendAllMetricsWithRetryDoesNotRetryNonTransportErrors(t *testing.T) {
+	_, _, err := SendRequestToServer(&http.Client{}, "http://example.com", MemMetrics{
+		"broken": {Type: "unsupported", Value: "1"},
+	})
+	require.Error(t, err)
+	assert.False(t, isRetriableRequestError(err))
 }

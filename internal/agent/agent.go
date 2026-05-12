@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"sync"
@@ -21,6 +24,12 @@ type AgentMetrics struct {
 	PollCount   int64
 	MemStats    runtime.MemStats
 	RandomValue float64
+}
+
+var retryIntervals = []time.Duration{
+	time.Second,
+	3 * time.Second,
+	5 * time.Second,
 }
 
 func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
@@ -65,15 +74,9 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 		snapshot := *metrics
 		mu.RUnlock()
 
-		// Отправка с повторными попытками
-		for attempt := 0; attempt < 3; attempt++ {
-			_, err := sendAllMetrics(client, *externalAddress, &snapshot)
-			if err != nil {
-				break
-			}
-			if attempt < 2 {
-				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
-			}
+		if _, err := sendAllMetricsWithRetry(client, *externalAddress, &snapshot, time.Sleep); err != nil {
+			log.Println("metrics send error:", err)
+			continue
 		}
 		log.Println("metrics sent")
 	}
@@ -130,6 +133,36 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	}
 
 	return resBody, nil
+}
+
+func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration)) ([]byte, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
+		resBody, err := sendAllMetrics(client, baseUrl, metrics)
+		if err == nil {
+			return resBody, nil
+		}
+
+		lastErr = err
+		if !isRetriableRequestError(err) || attempt == len(retryIntervals) {
+			return nil, err
+		}
+
+		sleep(retryIntervals[attempt])
+	}
+
+	return nil, lastErr
+}
+
+func isRetriableRequestError(err error) bool {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func Unzip(resp *http.Response) ([]byte, error) {
@@ -203,8 +236,7 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Println(err)
-		return nil, http.StatusInternalServerError, err
+		return nil, http.StatusInternalServerError, fmt.Errorf("send request: %w", err)
 	}
 
 	defer resp.Body.Close()

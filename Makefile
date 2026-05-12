@@ -116,3 +116,12 @@ test-iter12:
             -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
             -server-port=8080 \
             -source-path=.
+
+test-iter13:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="storage.json" ./metricstest -test.v -test.run=^TestIteration13$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
+            -server-port=8080 \
+            -source-path=.
