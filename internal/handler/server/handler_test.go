@@ -169,6 +169,70 @@ func TestGetMetricsByIDByJSON(t *testing.T) {
 	}
 }
 
+func TestBulkUpdateMetrics(t *testing.T) {
+	type want struct {
+		code int
+	}
+
+	tests := []struct {
+		name string
+		body []models.Metrics
+		want want
+	}{
+		{
+			name: "create counter",
+			body: []models.Metrics{
+				{
+					ID:    "jsonCounter",
+					MType: models.Counter,
+					Delta: int64Ptr(5),
+				},
+			},
+			want: want{code: http.StatusOK},
+		},
+		{
+			name: "invalid counter without delta",
+			body: []models.Metrics{
+				{
+					ID:    "jsonCounter",
+					MType: models.Counter,
+				},
+			},
+			want: want{code: http.StatusBadRequest},
+		},
+		{
+			name: "create gauge",
+			body: []models.Metrics{
+				{
+					ID:    "jsonGauge",
+					MType: models.Gauge,
+					Value: float64Ptr(3.14),
+				},
+			},
+			want: want{code: http.StatusOK},
+		},
+	}
+
+	router := newTestRouter()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.body)
+			assert.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			result := w.Result()
+			assert.Equal(t, tt.want.code, result.StatusCode)
+			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
+		})
+	}
+}
+
 func TestUpdateMetrics(t *testing.T) {
 	type want struct {
 		code        int

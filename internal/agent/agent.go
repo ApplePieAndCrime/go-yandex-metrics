@@ -67,8 +67,8 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 
 		// Отправка с повторными попытками
 		for attempt := 0; attempt < 3; attempt++ {
-			_, errs := sendAllMetrics(client, *externalAddress, &snapshot)
-			if len(errs) == 0 {
+			_, err := sendAllMetrics(client, *externalAddress, &snapshot)
+			if err != nil {
 				break
 			}
 			if attempt < 2 {
@@ -80,12 +80,14 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 	return nil
 }
 
-func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]string, []string) {
+type MemMetrics map[string]struct {
+	Type  string
+	Value string
+}
 
-	memMetrics := map[string]struct {
-		Type  string
-		Value string
-	}{
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]byte, error) {
+
+	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
 		"BuckHashSys":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.BuckHashSys)},
 		"Frees":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Frees)},
@@ -116,20 +118,18 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 		"RandomValue":   {Type: "gauge", Value: fmt.Sprintf("%f", metrics.RandomValue)},
 		"PollCount":     {Type: "counter", Value: fmt.Sprintf("%d", metrics.PollCount)},
 	}
-	resBody := []string{}
-	errors := []string{}
-	for metricName, metric := range memMetrics {
-		resp, _, err := SendRequestToServer(client, baseUrl, metric.Type, metricName, metric.Value)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("Error sending mem metric %s: %v\n", metricName, err))
-			continue
-		}
+	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-		resBody = append(resBody, fmt.Sprintf("%v", resp))
-		resp.Body.Close()
+	resBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	return resBody, errors
+	return resBody, nil
 }
 
 func Unzip(resp *http.Response) ([]byte, error) {
@@ -151,29 +151,40 @@ func Unzip(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
-func SendRequestToServer(client *http.Client, baseUrl string, metricType string, metricName string, metricValue string) (*http.Response, int, error) {
-	url := fmt.Sprintf("%s/update/", baseUrl)
+type UpdatedMetrics struct {
+	metricType  string
+	metricName  string
+	metricValue string
+}
 
-	payload := models.Metrics{
-		ID:    metricName,
-		MType: metricType,
-	}
+func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics) (*http.Response, int, error) {
+	url := fmt.Sprintf("%s/updates/", baseUrl)
 
-	switch metricType {
-	case models.Counter:
-		delta, err := strconv.ParseInt(metricValue, 10, 64)
-		if err != nil {
-			return nil, http.StatusBadRequest, err
+	var payload []models.Metrics
+	for metricName, updatedBody := range updatedBodies {
+
+		updatedMetrics := models.Metrics{
+			ID:    metricName,
+			MType: updatedBody.Type,
 		}
-		payload.Delta = &delta
-	case models.Gauge:
-		value, err := strconv.ParseFloat(metricValue, 64)
-		if err != nil {
-			return nil, http.StatusBadRequest, err
+
+		switch updatedBody.Type {
+		case models.Counter:
+			delta, err := strconv.ParseInt(updatedBody.Value, 10, 64)
+			if err != nil {
+				return nil, http.StatusBadRequest, err
+			}
+			updatedMetrics.Delta = &delta
+		case models.Gauge:
+			value, err := strconv.ParseFloat(updatedBody.Value, 64)
+			if err != nil {
+				return nil, http.StatusBadRequest, err
+			}
+			updatedMetrics.Value = &value
+		default:
+			return nil, http.StatusBadRequest, fmt.Errorf("unsupported metric type: %s", updatedBody.Type)
 		}
-		payload.Value = &value
-	default:
-		return nil, http.StatusBadRequest, fmt.Errorf("unsupported metric type: %s", metricType)
+		payload = append(payload, updatedMetrics)
 	}
 
 	body, err := json.Marshal(payload)

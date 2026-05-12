@@ -37,6 +37,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
 		r.Post("/value/", h.GetMetricsByIDWithJSON)
 		r.Post("/value", h.GetMetricsByIDWithJSON)
+		r.Post("/updates/", h.BulkUpdateMetrics)
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
 		r.Post("/update/", h.UpdateMetricsByJSON)
 		r.Post("/update", h.UpdateMetricsByJSON)
@@ -319,13 +320,56 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-
 	resp, err := json.Marshal(newMetrics)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
+func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var metricsList []models.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(req.Body)
+
+	defer req.Body.Close()
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err = json.Unmarshal(buf.Bytes(), &metricsList); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var updatedMetricsList []models.Metrics
+
+	for _, metrics := range metricsList {
+		if metrics.MType != models.Counter && metrics.MType != models.Gauge || (metrics.Delta == nil && metrics.Value == nil) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		updatedMetrics, err := h.services.CreateOrUpdateMetrics(metrics)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		updatedMetricsList = append(updatedMetricsList, *updatedMetrics)
+	}
+
+	resp, err := json.Marshal(updatedMetricsList)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }

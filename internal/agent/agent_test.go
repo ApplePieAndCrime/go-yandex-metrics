@@ -22,16 +22,19 @@ func TestSendRequestToServer(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			assert.Equal(t, http.MethodPost, r.Method)
-			assert.Equal(t, "/update/", r.URL.Path)
+			assert.Equal(t, "/updates/", r.URL.Path)
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
-			assert.JSONEq(t, `{"id":"test","type":"counter","delta":100}`, string(body))
+			assert.JSONEq(t, `[{"id":"test","type":"counter","delta":100}]`, string(body))
 
-			var metric models.Metrics
-			err = json.Unmarshal(body, &metric)
+			var metrics []models.Metrics
+			err = json.Unmarshal(body, &metrics)
 			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+
+			metric := metrics[0]
 
 			require.NotNil(t, metric.Delta)
 			assert.Equal(t, "test", metric.ID)
@@ -47,7 +50,9 @@ func TestSendRequestToServer(t *testing.T) {
 		}),
 	}
 
-	resp, statusCode, err := SendRequestToServer(client, "http://example.com", models.Counter, "test", "100")
+	resp, statusCode, err := SendRequestToServer(client, "http://example.com", MemMetrics{
+		"test": {Type: models.Counter, Value: "100"},
+	})
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -68,17 +73,19 @@ func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 
-			var metric models.Metrics
-			err = json.Unmarshal(body, &metric)
+			var metrics []models.Metrics
+			err = json.Unmarshal(body, &metrics)
 			require.NoError(t, err)
 
-			if metric.ID == "PollCount" || metric.ID == "RandomValue" {
-				sent[metric.ID] = append(sent[metric.ID], sentMetric{
-					ID:    metric.ID,
-					MType: metric.MType,
-					Delta: metric.Delta,
-					Value: metric.Value,
-				})
+			for _, metric := range metrics {
+				if metric.ID == "PollCount" || metric.ID == "RandomValue" {
+					sent[metric.ID] = append(sent[metric.ID], sentMetric{
+						ID:    metric.ID,
+						MType: metric.MType,
+						Delta: metric.Delta,
+						Value: metric.Value,
+					})
+				}
 			}
 
 			return &http.Response{
@@ -100,12 +107,12 @@ func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
 	metrics := &AgentMetrics{}
 
 	collectMetrics(metrics, randomFloat)
-	_, errors := sendAllMetrics(client, "http://example.com", metrics)
-	require.Empty(t, errors)
+	_, err := sendAllMetrics(client, "http://example.com", metrics)
+	require.NoError(t, err)
 
 	collectMetrics(metrics, randomFloat)
-	_, errors = sendAllMetrics(client, "http://example.com", metrics)
-	require.Empty(t, errors)
+	_, err = sendAllMetrics(client, "http://example.com", metrics)
+	require.NoError(t, err)
 
 	require.Len(t, sent["PollCount"], 2)
 	require.Len(t, sent["RandomValue"], 2)
