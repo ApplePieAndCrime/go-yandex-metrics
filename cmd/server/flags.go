@@ -21,6 +21,7 @@ func parseFlags() (*FlagConfig, error) {
 		Interval:    300,
 		StoragePath: "storage.json",
 		IsRestore:   true,
+		DatabaseDsn: "",
 	}
 
 	err := env.Parse(&cfg)
@@ -34,6 +35,7 @@ func parseFlags() (*FlagConfig, error) {
 	flag.Int64Var(&cfg.Interval, "i", cfg.Interval, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
 	flag.StringVar(&cfg.StoragePath, "f", cfg.StoragePath, "путь до файла, куда сохраняются текущие значения")
 	flag.BoolVar(&cfg.IsRestore, "r", cfg.IsRestore, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
+	flag.StringVar(&cfg.DatabaseDsn, "d", cfg.DatabaseDsn, "строка подключения к базе данных")
 
 	flag.Parse()
 

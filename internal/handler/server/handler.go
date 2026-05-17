@@ -49,9 +49,14 @@ func (h Handler) InitRoutes() *chi.Mux {
 }
 
 func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
+	if h.db == nil {
+		h.logger.Errorf("database is nil")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	err := h.db.Ping()
 	if err != nil {
-		h.logger.Fatalf("database ping error: %v", err)
+		h.logger.Errorf("database ping error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
