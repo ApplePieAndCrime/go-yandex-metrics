@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
-	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
+	repository "github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
@@ -18,11 +19,18 @@ import (
 
 func newTestRouter() http.Handler {
 	loggerSugar := logger.LoggerInitialize()
-	repo := repository.NewRepository()
-	repo.Storage.AddMetrics(*repo.Storage.NewMetrics("testCounter", models.Counter, 10, 0))
+
+	repo := repository.NewMemoryStorage()
+
+	delta := int64(10)
+	repo.SaveMetrics(context.Background(), models.Metrics{
+		ID:    "testCounter",
+		MType: models.Counter,
+		Delta: &delta,
+	})
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar)
+	handlers := handler.NewHandler(services, loggerSugar, nil)
 
 	return handlers.InitRoutes()
 }
@@ -149,6 +157,70 @@ func TestGetMetricsByIDByJSON(t *testing.T) {
 			assert.NoError(t, err)
 
 			req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			result := w.Result()
+			assert.Equal(t, tt.want.code, result.StatusCode)
+			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
+		})
+	}
+}
+
+func TestBulkUpdateMetrics(t *testing.T) {
+	type want struct {
+		code int
+	}
+
+	tests := []struct {
+		name string
+		body []models.Metrics
+		want want
+	}{
+		{
+			name: "create counter",
+			body: []models.Metrics{
+				{
+					ID:    "jsonCounter",
+					MType: models.Counter,
+					Delta: int64Ptr(5),
+				},
+			},
+			want: want{code: http.StatusOK},
+		},
+		{
+			name: "invalid counter without delta",
+			body: []models.Metrics{
+				{
+					ID:    "jsonCounter",
+					MType: models.Counter,
+				},
+			},
+			want: want{code: http.StatusBadRequest},
+		},
+		{
+			name: "create gauge",
+			body: []models.Metrics{
+				{
+					ID:    "jsonGauge",
+					MType: models.Gauge,
+					Value: float64Ptr(3.14),
+				},
+			},
+			want: want{code: http.StatusOK},
+		},
+	}
+
+	router := newTestRouter()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.body)
+			assert.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 

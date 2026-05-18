@@ -81,3 +81,47 @@ test-iter9:
         -file-storage-path="storage.json" \
         -server-port=8080 \
         -source-path=.
+
+test-iter10:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="storage.json" ./metricstest -test.v -test.run=^TestIteration10$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
+            -server-port=8080 \
+            -source-path=.
+
+migrate-force-11:
+	migrate -database "postgres://postgres:root@localhost:5432/praktikum?sslmode=disable" -path ./migrations force 1
+
+migrate-up-11:
+	migrate -database "postgres://postgres:root@localhost:5432/praktikum?sslmode=disable" -path ./migrations up
+migrate-down-11:
+	migrate -database "postgres://postgres:root@localhost:5432/praktikum?sslmode=disable" -path ./migrations down --force
+
+test-iter11:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="storage.json" ./metricstest -test.v -test.run=^TestIteration11$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
+            -server-port=8080 \
+            -source-path=.
+
+test-iter12:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="storage.json" ./metricstest -test.v -test.run=^TestIteration12$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
+            -server-port=8080 \
+            -source-path=.
+
+test-iter13:
+	make app-build
+	SERVER_PORT=8080 ADDRESS="localhost:8080" TEMP_FILE="storage.json" ./metricstest -test.v -test.run=^TestIteration13$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -database-dsn='postgres://postgres:root@localhost:5432/praktikum?sslmode=disable' \
+            -server-port=8080 \
+            -source-path=.

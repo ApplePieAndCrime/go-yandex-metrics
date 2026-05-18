@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,16 +14,18 @@ import (
 	loggerMiddleware "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/go-chi/chi"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 )
 
 type Handler struct {
 	services *service.Service
 	logger   *zap.SugaredLogger
+	db       *sql.DB
 }
 
-func NewHandler(services *service.Service, logger zap.SugaredLogger) *Handler {
-	return &Handler{services: services, logger: logger.With("component", "handler")}
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB) *Handler {
+	return &Handler{services: services, logger: logger.With("component", "handler"), db: db}
 }
 
 func (h Handler) InitRoutes() *chi.Mux {
@@ -34,17 +37,41 @@ func (h Handler) InitRoutes() *chi.Mux {
 		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
 		r.Post("/value/", h.GetMetricsByIDWithJSON)
 		r.Post("/value", h.GetMetricsByIDWithJSON)
+		r.Post("/updates/", h.BulkUpdateMetrics)
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
 		r.Post("/update/", h.UpdateMetricsByJSON)
 		r.Post("/update", h.UpdateMetricsByJSON)
+		r.Get("/ping", h.Ping)
 		r.Get("/", h.GetAllMetrics)
 	})
 
 	return r
 }
 
+func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
+	if h.db == nil {
+		h.logger.Errorf("database is nil")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	err := h.db.Ping()
+	if err != nil {
+		h.logger.Errorf("database ping error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Infoln("Successfully connected to PostgreSQL!")
+	w.WriteHeader(http.StatusOK)
+}
+
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
-	metricsList := h.services.GetAllMetrics()
+	metricsList, err := h.services.GetAllMetrics()
+	if err != nil {
+		h.logger.Errorln("error fetching all metrics: ", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
@@ -63,11 +90,14 @@ func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metricName, metricType)
 
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -107,10 +137,11 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	existingMetrics, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	existingMetrics, exists, err := h.services.GetMetricsByID(metrics.ID, metrics.MType)
 	fmt.Println("exists", exists)
 	fmt.Println("existingMetric", existingMetrics)
-	if !exists {
+
+	if err != nil || !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -168,7 +199,12 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	existingMetric, exists := h.services.GetMetricsByID(metricName, metricType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metricName, metricType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if exists {
 		h.services.UpdateMetrics(existingMetric, delta, value)
 		w.WriteHeader(http.StatusOK)
@@ -181,7 +217,11 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 		w.Write(resp)
 	} else {
-		newMetrics := h.services.CreateMetrics(metricName, metricType, delta, value)
+		newMetrics, createErr := h.services.CreateMetrics(metricName, metricType, delta, value)
+		if createErr != nil {
+			http.Error(w, createErr.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 
 		resp, err := json.Marshal(newMetrics)
@@ -237,7 +277,11 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
-	existingMetric, exists := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	existingMetric, exists, err := h.services.GetMetricsByID(metrics.ID, metrics.MType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if exists {
 		var delta int64
 		var value float64
@@ -274,8 +318,12 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		value = *metrics.Value
 	}
 
-	newMetrics := h.services.CreateMetrics(metrics.ID, metrics.MType, delta, value)
-	w.WriteHeader(http.StatusOK)
+	newMetrics, createErr := h.services.CreateMetrics(metrics.ID, metrics.MType, delta, value)
+
+	if createErr != nil {
+		http.Error(w, createErr.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	resp, err := json.Marshal(newMetrics)
 	if err != nil {
@@ -283,5 +331,55 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
+func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var metricsList []models.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(req.Body)
+
+	defer req.Body.Close()
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err = json.Unmarshal(buf.Bytes(), &metricsList); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(metricsList) == 0 {
+		http.Error(w, "Пустой массив", http.StatusBadRequest)
+		return
+	}
+	var updatedMetricsList []models.Metrics
+
+	for _, metrics := range metricsList {
+		if metrics.MType != models.Counter && metrics.MType != models.Gauge || (metrics.Delta == nil && metrics.Value == nil) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		updatedMetrics, err := h.services.CreateOrUpdateMetrics(metrics)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		updatedMetricsList = append(updatedMetricsList, *updatedMetrics)
+	}
+
+	resp, err := json.Marshal(updatedMetricsList)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }

@@ -1,66 +1,65 @@
 package service
 
 import (
+	"context"
+
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 )
 
 type Service struct {
-	repository *repository.Repository
+	storage repository.Storage
 }
 
-func NewService(repository *repository.Repository) *Service {
-	return &Service{repository: repository}
+func NewService(storage repository.Storage) *Service {
+	return &Service{storage: storage}
 }
 
-func (s *Service) GetAllMetrics() []models.Metrics {
-	return s.repository.Storage.GetAllMetrics()
+func (s *Service) GetAllMetrics() ([]models.Metrics, error) {
+	return s.storage.GetAllMetrics(context.Background())
 }
 
-func (s *Service) GetMetricsByID(id string, mType string) (*models.Metrics, bool) {
-	return s.repository.Storage.GetMetricsByID(id, mType)
+func (s *Service) GetMetricsByID(id string, mType string) (*models.Metrics, bool, error) {
+	return s.storage.GetMetricsByID(context.Background(), id, mType)
 }
 
-func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, value float64) *models.Metrics {
+func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, value float64) (*models.Metrics, error) {
+	updated := models.Metrics{
+		ID:    existingMetric.ID,
+		MType: existingMetric.MType,
+	}
+
 	switch existingMetric.MType {
 	case models.Counter:
-		if existingMetric.Delta == nil {
-			existingMetric.Delta = &delta
-		} else {
-			*existingMetric.Delta += delta
-		}
+		updated.Delta = &delta
 	case models.Gauge:
-		if existingMetric.Value == nil {
-			existingMetric.Value = &value
-		} else {
-			*existingMetric.Value = value
-		}
+		updated.Value = &value
 	}
-	return existingMetric
+
+	return s.storage.SaveMetrics(context.Background(), updated)
 }
 
-func (s *Service) CreateOrUpdateMetrics(metrics models.Metrics) *models.Metrics {
-	var d int64
-	var v float64
-
-	// Безопасно извлекаем значения
-	if metrics.Delta != nil {
-		d = *metrics.Delta
-	}
-	if metrics.Value != nil {
-		v = *metrics.Value
-	}
-
-	existingMetric, exists := s.GetMetricsByID(metrics.ID, metrics.MType)
-	if exists {
-		return s.UpdateMetrics(existingMetric, d, v)
-	} else {
-		return s.CreateMetrics(metrics.ID, metrics.MType, d, v)
-	}
+func (s *Service) CreateOrUpdateMetrics(metrics models.Metrics) (*models.Metrics, error) {
+	return s.storage.SaveMetrics(context.Background(), metrics)
 }
 
-func (s *Service) CreateMetrics(metricName string, metricType string, delta int64, value float64) *models.Metrics {
-	newMetrics := s.repository.NewMetrics(metricName, metricType, delta, value)
-	s.repository.Storage.AddMetrics(*newMetrics)
-	return newMetrics
+func (s *Service) CreateMetrics(metricName string, metricType string, delta int64, value float64) (*models.Metrics, error) {
+	newMetrics := models.Metrics{
+		ID:    metricName,
+		MType: metricType,
+	}
+
+	switch metricType {
+	case models.Counter:
+		newMetrics.Delta = &delta
+	case models.Gauge:
+		newMetrics.Value = &value
+	}
+
+	savedMetrics, err := s.storage.SaveMetrics(context.Background(), newMetrics)
+	if err != nil {
+		return nil, err
+	}
+
+	return savedMetrics, nil
 }
