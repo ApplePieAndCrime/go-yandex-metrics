@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
@@ -38,7 +39,7 @@ func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
 	metrics.RandomValue = randomFloat()
 }
 
-func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) error {
+func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64, key *string) error {
 	// Даём серверу время на запуск (2 секунды достаточно)
 	time.Sleep(2 * time.Second)
 
@@ -74,7 +75,7 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 		snapshot := *metrics
 		mu.RUnlock()
 
-		if _, err := sendAllMetricsWithRetry(client, *externalAddress, &snapshot, time.Sleep); err != nil {
+		if _, err := sendAllMetricsWithRetry(client, *externalAddress, &snapshot, time.Sleep, *key); err != nil {
 			log.Println("metrics send error:", err)
 			continue
 		}
@@ -88,7 +89,7 @@ type MemMetrics map[string]struct {
 	Value string
 }
 
-func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]byte, error) {
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string) ([]byte, error) {
 
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
@@ -121,7 +122,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 		"RandomValue":   {Type: "gauge", Value: fmt.Sprintf("%f", metrics.RandomValue)},
 		"PollCount":     {Type: "counter", Value: fmt.Sprintf("%d", metrics.PollCount)},
 	}
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics)
+	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +136,11 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, nil
 }
 
-func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration)) ([]byte, error) {
+func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string) ([]byte, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
-		resBody, err := sendAllMetrics(client, baseUrl, metrics)
+		resBody, err := sendAllMetrics(client, baseUrl, metrics, key)
 		if err == nil {
 			return resBody, nil
 		}
@@ -190,7 +191,7 @@ type UpdatedMetrics struct {
 	metricValue string
 }
 
-func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics) (*http.Response, int, error) {
+func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/updates/", baseUrl)
 
 	var payload []models.Metrics
@@ -232,6 +233,10 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if key != "" {
+		req.Header.Set(hashutil.HeaderName, hashutil.HashBody(body, key))
+	}
 
 	resp, err := client.Do(req)
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	repository "github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
@@ -17,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newTestRouter() http.Handler {
+func newTestRouter(key string) http.Handler {
 	loggerSugar := logger.LoggerInitialize()
 
 	repo := repository.NewMemoryStorage()
@@ -30,7 +31,7 @@ func newTestRouter() http.Handler {
 	})
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar, nil)
+	handlers := handler.NewHandler(services, loggerSugar, nil, key)
 
 	return handlers.InitRoutes()
 }
@@ -40,7 +41,7 @@ func TestGetAllMetrics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	newTestRouter().ServeHTTP(w, req)
+	newTestRouter("").ServeHTTP(w, req)
 
 	res := w.Result()
 	body, _ := io.ReadAll(res.Body)
@@ -95,7 +96,7 @@ func TestGetMetricsByID(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter()
+	router := newTestRouter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,7 +150,7 @@ func TestGetMetricsByIDByJSON(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter()
+	router := newTestRouter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,7 +214,7 @@ func TestBulkUpdateMetrics(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter()
+	router := newTestRouter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -274,7 +275,7 @@ func TestUpdateMetrics(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter()
+	router := newTestRouter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -328,7 +329,7 @@ func TestUpdateMetricsByJSON(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter()
+	router := newTestRouter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -346,6 +347,50 @@ func TestUpdateMetricsByJSON(t *testing.T) {
 			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
 		})
 	}
+}
+
+func TestUpdateMetricsByJSONRejectsInvalidHash(t *testing.T) {
+	router := newTestRouter("test-key")
+
+	body, err := json.Marshal(models.Metrics{
+		ID:    "jsonCounter",
+		MType: models.Counter,
+		Delta: int64Ptr(5),
+	})
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(hashutil.HeaderName, "broken-hash")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	assert.Equal(t, http.StatusBadRequest, result.StatusCode)
+}
+
+func TestGetMetricsByIDWithJSONSetsResponseHash(t *testing.T) {
+	router := newTestRouter("test-key")
+
+	requestBody, err := json.Marshal(models.Metrics{
+		ID:    "testCounter",
+		MType: models.Counter,
+	})
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(hashutil.HeaderName, hashutil.HashBody(requestBody, "test-key"))
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	responseBody, err := io.ReadAll(result.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+	assert.Equal(t, hashutil.HashBody(responseBody, "test-key"), result.Header.Get(hashutil.HeaderName))
 }
 
 func int64Ptr(v int64) *int64 {

@@ -13,6 +13,7 @@ type FlagConfig struct {
 	StoragePath string `env:"FILE_STORAGE_PATH"`
 	IsRestore   bool   `env:"RESTORE"`
 	DatabaseDsn string `env:"DATABASE_DSN"`
+	Key         string `env:"KEY"`
 }
 
 func parseFlags() (*FlagConfig, error) {
@@ -22,6 +23,7 @@ func parseFlags() (*FlagConfig, error) {
 		StoragePath: "storage.json",
 		IsRestore:   true,
 		DatabaseDsn: "",
+		Key:         "",
 	}
 
 	err := env.Parse(&cfg)
@@ -36,6 +38,7 @@ func parseFlags() (*FlagConfig, error) {
 	flag.StringVar(&cfg.StoragePath, "f", cfg.StoragePath, "путь до файла, куда сохраняются текущие значения")
 	flag.BoolVar(&cfg.IsRestore, "r", cfg.IsRestore, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
 	flag.StringVar(&cfg.DatabaseDsn, "d", cfg.DatabaseDsn, "строка подключения к базе данных")
+	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
 
 	flag.Parse()
 

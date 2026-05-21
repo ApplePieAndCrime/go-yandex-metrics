@@ -82,8 +82,12 @@ func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 		storage = repository.NewMemoryStorage()
 	}
 
+	if flagConfig.Key != "" {
+		loggerSugar.Infoln("Using key for authentication")
+	}
+
 	services := service.NewService(storage)
-	handlers := handler.NewHandler(services, loggerSugar, db)
+	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key)
 
 	routes := handlers.InitRoutes()
 
