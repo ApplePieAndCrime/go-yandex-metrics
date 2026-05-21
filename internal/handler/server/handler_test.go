@@ -371,6 +371,26 @@ func TestUpdateMetricsByJSONRejectsInvalidHash(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, result.StatusCode)
 }
 
+func TestUpdateMetricsByJSONAllowsMissingHashHeader(t *testing.T) {
+	router := newTestRouter("test-key")
+
+	body, err := json.Marshal(models.Metrics{
+		ID:    "jsonCounter",
+		MType: models.Counter,
+		Delta: int64Ptr(5),
+	})
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+}
+
 func TestGetMetricsByIDWithJSONReturnsNotFoundForEmptyBody(t *testing.T) {
 	router := newTestRouter("")
 

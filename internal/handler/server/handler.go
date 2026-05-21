@@ -398,7 +398,8 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 		return body, nil
 	}
 
-	if !hashutil.IsValid(body, h.key, req.Header.Get(hashutil.HeaderName)) {
+	receivedHash := req.Header.Get(hashutil.HeaderName)
+	if receivedHash != "" && !hashutil.IsValid(body, h.key, receivedHash) {
 		return nil, fmt.Errorf("invalid request hash")
 	}
 
