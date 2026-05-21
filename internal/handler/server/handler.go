@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -380,6 +381,19 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
+	if isGzipBody(body) {
+		gz, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+
+		body, err = io.ReadAll(gz)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if h.key == "" {
 		return body, nil
 	}
@@ -389,6 +403,10 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+func isGzipBody(body []byte) bool {
+	return len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b
 }
 
 func writeError(w http.ResponseWriter, message string, statusCode int) {

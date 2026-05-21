@@ -412,6 +412,70 @@ func TestUpdateMetricsByJSONAcceptsGzipRequest(t *testing.T) {
 	assert.Equal(t, http.StatusOK, result.StatusCode)
 }
 
+func TestUpdateMetricsByJSONAcceptsGzipBodyWithoutContentEncoding(t *testing.T) {
+	router := newTestRouter("")
+
+	body, err := json.Marshal(models.Metrics{
+		ID:    "gzipGauge",
+		MType: models.Gauge,
+		Value: float64Ptr(3.14),
+	})
+	assert.NoError(t, err)
+
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	_, err = gz.Write(body)
+	assert.NoError(t, err)
+	assert.NoError(t, gz.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", &compressed)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+}
+
+func TestUpdateThenGetMetricsByIDWithJSONReturnsValue(t *testing.T) {
+	router := newTestRouter("")
+
+	updateBody, err := json.Marshal(models.Metrics{
+		ID:    "jsonGauge",
+		MType: models.Gauge,
+		Value: float64Ptr(3.14),
+	})
+	assert.NoError(t, err)
+
+	updateReq := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRecorder := httptest.NewRecorder()
+	router.ServeHTTP(updateRecorder, updateReq)
+	assert.Equal(t, http.StatusOK, updateRecorder.Result().StatusCode)
+
+	valueBody, err := json.Marshal(models.Metrics{
+		ID:    "jsonGauge",
+		MType: models.Gauge,
+	})
+	assert.NoError(t, err)
+
+	valueReq := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(valueBody))
+	valueReq.Header.Set("Content-Type", "application/json")
+	valueRecorder := httptest.NewRecorder()
+	router.ServeHTTP(valueRecorder, valueReq)
+
+	result := valueRecorder.Result()
+	responseBody, err := io.ReadAll(result.Body)
+	assert.NoError(t, err)
+
+	var metric models.Metrics
+	assert.NoError(t, json.Unmarshal(responseBody, &metric))
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+	assert.NotNil(t, metric.Value)
+	assert.Nil(t, metric.Delta)
+}
+
 func TestGetMetricsByIDWithJSONSetsResponseHash(t *testing.T) {
 	router := newTestRouter("test-key")
 
