@@ -2,15 +2,14 @@ package hashutil
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"encoding/hex"
 )
 
 const HeaderName = "HashSHA256"
 
 func HashBody(body []byte, key string) string {
-	payload := append(body, key...)
-	sum := sha256.Sum256(payload)
-	return fmt.Sprintf("%x", sum)
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 
 func IsValid(body []byte, key string, received string) bool {

@@ -19,11 +19,6 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 
 func ZipMiddleware(next http.Handler) http.Handler {
 	zipFn := func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
 			gz, err := gzip.NewReader(r.Body)
 			if err != nil {
@@ -32,6 +27,11 @@ func ZipMiddleware(next http.Handler) http.Handler {
 			}
 			defer gz.Close()
 			r.Body = gz
+		}
+
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		w.Header().Set("Content-Encoding", "gzip")

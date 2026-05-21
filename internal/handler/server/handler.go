@@ -120,6 +120,11 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	if len(body) == 0 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
 	if err = json.Unmarshal(body, &metrics); err != nil {
 		h.logger.Errorln("unmarshal err: ", err)
 		writeError(w, err.Error(), http.StatusBadRequest)

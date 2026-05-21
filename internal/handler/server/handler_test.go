@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -368,6 +369,47 @@ func TestUpdateMetricsByJSONRejectsInvalidHash(t *testing.T) {
 
 	result := w.Result()
 	assert.Equal(t, http.StatusBadRequest, result.StatusCode)
+}
+
+func TestGetMetricsByIDWithJSONReturnsNotFoundForEmptyBody(t *testing.T) {
+	router := newTestRouter("")
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", nil)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	assert.Equal(t, http.StatusNotFound, result.StatusCode)
+	assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
+}
+
+func TestUpdateMetricsByJSONAcceptsGzipRequest(t *testing.T) {
+	router := newTestRouter("")
+
+	body, err := json.Marshal(models.Metrics{
+		ID:    "gzipGauge",
+		MType: models.Gauge,
+		Value: float64Ptr(3.14),
+	})
+	assert.NoError(t, err)
+
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	_, err = gz.Write(body)
+	assert.NoError(t, err)
+	assert.NoError(t, gz.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", &compressed)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	result := w.Result()
+	assert.Equal(t, http.StatusOK, result.StatusCode)
 }
 
 func TestGetMetricsByIDWithJSONSetsResponseHash(t *testing.T) {
