@@ -116,13 +116,13 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 	var metrics models.Metrics
 	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err = json.Unmarshal(body, &metrics); err != nil {
 		h.logger.Errorln("unmarshal err: ", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -233,12 +233,12 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	var metrics models.Metrics
 	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err = json.Unmarshal(body, &metrics); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -329,17 +329,17 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	var metricsList []models.Metrics
 	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err = json.Unmarshal(body, &metricsList); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if len(metricsList) == 0 {
-		http.Error(w, "Пустой массив", http.StatusBadRequest)
+		writeError(w, "Пустой массив", http.StatusBadRequest)
 		return
 	}
 	var updatedMetricsList []models.Metrics
@@ -384,6 +384,11 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+func writeError(w http.ResponseWriter, message string, statusCode int) {
+	w.WriteHeader(statusCode)
+	w.Write([]byte(message))
 }
 
 type hashResponseWriter struct {
