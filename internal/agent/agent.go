@@ -14,17 +14,22 @@ import (
 	"net/url"
 	"runtime"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
+	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 type AgentMetrics struct {
-	PollCount   int64
-	MemStats    runtime.MemStats
-	RandomValue float64
+	PollCount      int64
+	MemStats       runtime.MemStats
+	RandomValue    float64
+	TotalMemory    uint64
+	FreeMemory     uint64
+	CPUutilization []float64
 }
 
 var retryIntervals = []time.Duration{
@@ -37,14 +42,30 @@ func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
 	runtime.ReadMemStats(&metrics.MemStats)
 	metrics.PollCount++
 	metrics.RandomValue = randomFloat()
+
+	memStats, _ := mem.VirtualMemory()
+	metrics.TotalMemory = memStats.Total
+	metrics.FreeMemory = memStats.Free
+
+	cpuStats, _ := cpu.Percent(0, true)
+	metrics.CPUutilization = cpuStats
 }
 
-func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64, key *string) error {
+func RunAgent(
+	externalAddress string,
+	pollCount int64,
+	reportInterval int64,
+	key string,
+	rateLimit int,
+) error {
 	// Даём серверу время на запуск (2 секунды достаточно)
 	time.Sleep(2 * time.Second)
 
-	currentPollInterval := time.Duration(*pollCount) * time.Second
-	currentReportInterval := time.Duration(*reportInterval) * time.Second
+	pool := workerPool.NewPool(rateLimit)
+	pool.Start()
+
+	currentPollInterval := time.Duration(pollCount) * time.Second
+	currentReportInterval := time.Duration(reportInterval) * time.Second
 
 	client := &http.Client{
 		Timeout: currentReportInterval,
@@ -59,29 +80,37 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64, 
 	defer reportTicker.Stop()
 
 	metrics := &AgentMetrics{}
-	var mu sync.RWMutex
 
 	go func() {
 		for range pollTicker.C {
-			mu.Lock()
-			collectMetrics(metrics, rand.Float64)
-			mu.Unlock()
-			log.Println("metrics collected")
+			pool.AddTask(func() {
+				collectMetrics(metrics, rand.Float64)
+				log.Println("metrics collected")
+			})
 		}
 	}()
 
 	for range reportTicker.C {
-		mu.RLock()
-		snapshot := *metrics
-		mu.RUnlock()
+		pool.AddTask(func() {
+			snapshot := *metrics
 
-		if _, err := sendAllMetricsWithRetry(client, *externalAddress, &snapshot, time.Sleep, *key); err != nil {
-			log.Println("metrics send error:", err)
-			continue
-		}
-		log.Println("metrics sent")
+			if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
+				pool.AddError(fmt.Errorf("metrics send error:%v", err))
+				return
+			}
+			log.Println("metrics sent")
+		})
 	}
+
+	pool.Wait()
+
+	errors := pool.Errors()
+	if len(errors) > 0 {
+		return fmt.Errorf("errors: %v", errors)
+	}
+
 	return nil
+
 }
 
 type MemMetrics map[string]struct {
@@ -121,7 +150,21 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 		"TotalAlloc":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.TotalAlloc)},
 		"RandomValue":   {Type: "gauge", Value: fmt.Sprintf("%f", metrics.RandomValue)},
 		"PollCount":     {Type: "counter", Value: fmt.Sprintf("%d", metrics.PollCount)},
+		"TotalMemory":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.TotalMemory)},
+		"FreeMemory":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.FreeMemory)},
 	}
+
+	for i, cpuUtil := range metrics.CPUutilization {
+		metricName := fmt.Sprintf("CPUutilization%d", i+1)
+		memMetrics[metricName] = struct {
+			Type  string
+			Value string
+		}{
+			Type:  "gauge",
+			Value: fmt.Sprintf("%f", cpuUtil),
+		}
+	}
+
 	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key)
 	if err != nil {
 		return nil, err

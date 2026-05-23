@@ -10,7 +10,14 @@ func main() {
 	flagConfig := parseFlags()
 	log.Println("AGENT CONFIG ", flagConfig)
 
-	err := internal_agent.RunAgent(&flagConfig.ExternalAddress, &flagConfig.PollInterval, &flagConfig.ReportInterval, &flagConfig.Key)
+	err := internal_agent.RunAgent(
+		flagConfig.ExternalAddress,
+		flagConfig.PollInterval,
+		flagConfig.ReportInterval,
+		flagConfig.Key,
+		flagConfig.RateLimit,
+	)
+
 	if err != nil {
 		panic(err)
 	}

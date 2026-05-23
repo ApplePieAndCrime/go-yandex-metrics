@@ -12,6 +12,7 @@ type FlagConfig struct {
 	PollInterval    int64  `env:"POLL_INTERVAL"`
 	ReportInterval  int64  `env:"REPORT_INTERVAL"`
 	Key             string `env:"KEY"`
+	RateLimit       int    `env:"RATE_LIMIT"`
 }
 
 func parseFlags() FlagConfig {
@@ -20,6 +21,7 @@ func parseFlags() FlagConfig {
 		PollInterval:    2,
 		ReportInterval:  10,
 		Key:             "",
+		RateLimit:       1,
 	}
 	err := env.Parse(&cfg)
 	if err != nil {
@@ -30,6 +32,7 @@ func parseFlags() FlagConfig {
 	flag.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "интервал опроса в секундах")
 	flag.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "интервал отчетов в секундах")
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
+	flag.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
 
 	flag.Parse()
 
