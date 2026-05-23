@@ -5,19 +5,16 @@ import (
 )
 
 type Worker struct {
-	id             int
-	taskChan       chan func()
-	completedTasks int64
-	pool           *Pool
+	id       int
+	taskChan <-chan func()
+	wg       *sync.WaitGroup
 }
 
 type Pool struct {
 	workers    []*Worker
 	maxWorkers int
 	taskChan   chan func()
-	waitGroup  sync.WaitGroup
-	notifyCh   chan struct{}
-	taskCount  int64
+	wg         sync.WaitGroup
 	mu         sync.Mutex
 	errors     []error
 }
@@ -25,36 +22,34 @@ type Pool struct {
 func NewPool(maxWorkers int) *Pool {
 	return &Pool{
 		maxWorkers: maxWorkers,
-		workers:    make([]*Worker, 0),
 		taskChan:   make(chan func()),
-		waitGroup:  sync.WaitGroup{},
-		notifyCh:   make(chan struct{}),
+		workers:    make([]*Worker, 0),
 	}
 }
 
 func (p *Pool) Start() {
 	for i := 0; i < p.maxWorkers; i++ {
-		worker := &Worker{id: i, taskChan: p.taskChan}
-		p.workers = append(p.workers, worker)
-		go worker.Start()
+		w := &Worker{
+			id:       i,
+			taskChan: p.taskChan,
+			wg:       &p.wg,
+		}
+		p.workers = append(p.workers, w)
+		go w.Start()
 	}
 }
 
 func (w *Worker) Start() {
+	w.wg.Add(1)
 	go func() {
+		defer w.wg.Done()
 		for task := range w.taskChan {
-			w.pool.Wait()
 			task()
 		}
 	}()
 }
 
 func (p *Pool) AddTask(task func()) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.taskChan == nil {
-		return
-	}
 	p.taskChan <- task
 }
 
@@ -71,7 +66,6 @@ func (p *Pool) Errors() []error {
 }
 
 func (p *Pool) Wait() {
-	for range p.workers {
-		<-p.taskChan
-	}
+	close(p.taskChan)
+	p.wg.Wait()
 }
