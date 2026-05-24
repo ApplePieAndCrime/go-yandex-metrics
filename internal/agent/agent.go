@@ -64,6 +64,11 @@ func RunAgent(
 	pool := workerPool.NewPool(rateLimit)
 	pool.Start()
 
+	defer func() {
+		pool.Close()
+		pool.Wait()
+	}()
+
 	currentPollInterval := time.Duration(pollCount) * time.Second
 	currentReportInterval := time.Duration(reportInterval) * time.Second
 
