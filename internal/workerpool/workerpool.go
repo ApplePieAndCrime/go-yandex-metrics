@@ -50,6 +50,8 @@ func (w *worker) Start() {
 }
 
 func (p *Pool) AddTask(task func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.taskChan <- task
 }
 
