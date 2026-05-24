@@ -68,7 +68,7 @@ func TestSendRequestToServerSetsHashHeader(t *testing.T) {
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
-			assert.Equal(t, hashutil.HashBody(body, "test-key"), r.Header.Get(hashutil.HeaderName))
+			assert.Equal(t, hashutil.SignBody(body, "test-key"), r.Header.Get(hashutil.HeaderName))
 
 			return &http.Response{
 				StatusCode: http.StatusOK,

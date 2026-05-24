@@ -1,17 +1,20 @@
 package hashutil
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 )
 
 const HeaderName = "HashSHA256"
 
-func HashBody(body []byte, key string) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+func SignBody(body []byte, key string) string {
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
-func IsValid(body []byte, key string, received string) bool {
-	return received == HashBody(body, key)
+func VerifySignature(body []byte, signature string, key string) bool {
+	expected := SignBody(body, key)
+	return hmac.Equal([]byte(expected), []byte(signature))
 }

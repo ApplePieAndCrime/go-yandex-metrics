@@ -278,7 +278,7 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	if key != "" {
-		req.Header.Set(hashutil.HeaderName, hashutil.HashBody(body, key))
+		req.Header.Set(hashutil.HeaderName, hashutil.SignBody(body, key))
 	}
 
 	resp, err := client.Do(req)

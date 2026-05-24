@@ -399,7 +399,7 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 	}
 
 	receivedHash := req.Header.Get(hashutil.HeaderName)
-	if receivedHash != "" && !hashutil.IsValid(body, h.key, receivedHash) {
+	if receivedHash != "" && !hashutil.VerifySignature(body, receivedHash, h.key) {
 		return nil, fmt.Errorf("invalid request hash")
 	}
 
@@ -456,7 +456,7 @@ func (h Handler) HashResponseMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		w.Header().Set(hashutil.HeaderName, hashutil.HashBody(buffered.body.Bytes(), h.key))
+		w.Header().Set(hashutil.HeaderName, hashutil.SignBody(buffered.body.Bytes(), h.key))
 		w.WriteHeader(buffered.status)
 		_, _ = w.Write(buffered.body.Bytes())
 	})

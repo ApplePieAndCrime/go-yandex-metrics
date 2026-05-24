@@ -507,7 +507,7 @@ func TestGetMetricsByIDWithJSONSetsResponseHash(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(hashutil.HeaderName, hashutil.HashBody(requestBody, "test-key"))
+	req.Header.Set(hashutil.HeaderName, hashutil.SignBody(requestBody, "test-key"))
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -516,7 +516,7 @@ func TestGetMetricsByIDWithJSONSetsResponseHash(t *testing.T) {
 	responseBody, err := io.ReadAll(result.Body)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, result.StatusCode)
-	assert.Equal(t, hashutil.HashBody(responseBody, "test-key"), result.Header.Get(hashutil.HeaderName))
+	assert.Equal(t, hashutil.SignBody(responseBody, "test-key"), result.Header.Get(hashutil.HeaderName))
 }
 
 func int64Ptr(v int64) *int64 {

@@ -4,14 +4,14 @@ import (
 	"sync"
 )
 
-type Worker struct {
+type worker struct {
 	id       int
 	taskChan <-chan func()
 	wg       *sync.WaitGroup
 }
 
 type Pool struct {
-	workers    []*Worker
+	workers    []*worker
 	maxWorkers int
 	taskChan   chan func()
 	wg         sync.WaitGroup
@@ -23,24 +23,24 @@ func NewPool(maxWorkers int) *Pool {
 	return &Pool{
 		maxWorkers: maxWorkers,
 		taskChan:   make(chan func()),
-		workers:    make([]*Worker, 0),
+		workers:    make([]*worker, 0),
 	}
 }
 
 func (p *Pool) Start() {
 	for i := 0; i < p.maxWorkers; i++ {
-		w := &Worker{
+		w := &worker{
 			id:       i,
 			taskChan: p.taskChan,
 			wg:       &p.wg,
 		}
+		w.wg.Add(1)
 		p.workers = append(p.workers, w)
 		go w.Start()
 	}
 }
 
-func (w *Worker) Start() {
-	w.wg.Add(1)
+func (w *worker) Start() {
 	go func() {
 		defer w.wg.Done()
 		for task := range w.taskChan {
