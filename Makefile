@@ -11,6 +11,9 @@ server-run:
 agent-run:
 	go run ./cmd/agent
 
+agent-run-race:
+	go run -race ./cmd/agent
+
 server-test:
 	go test -v ./internal/handler/server
 agent-test:

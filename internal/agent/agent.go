@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
@@ -32,23 +33,45 @@ type AgentMetrics struct {
 	CPUutilization []float64
 }
 
+type SafeMetrics struct {
+	mu   sync.RWMutex
+	data AgentMetrics
+}
+
 var retryIntervals = []time.Duration{
 	time.Second,
 	3 * time.Second,
 	5 * time.Second,
 }
 
-func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
-	runtime.ReadMemStats(&metrics.MemStats)
-	metrics.PollCount++
-	metrics.RandomValue = randomFloat()
+func (m *SafeMetrics) collect(randomFloat func() float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime.ReadMemStats(&m.data.MemStats)
+	m.data.PollCount++
+	m.data.RandomValue = randomFloat()
 
 	memStats, _ := mem.VirtualMemory()
-	metrics.TotalMemory = memStats.Total
-	metrics.FreeMemory = memStats.Free
+	m.data.TotalMemory = memStats.Total
+	m.data.FreeMemory = memStats.Free
 
 	cpuStats, _ := cpu.Percent(0, true)
-	metrics.CPUutilization = cpuStats
+	m.data.CPUutilization = cpuStats
+}
+
+func (m *SafeMetrics) Snapshot() AgentMetrics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	snapshot := m.data
+
+	snapshot.CPUutilization = append(
+		[]float64(nil),
+		m.data.CPUutilization...,
+	)
+
+	return snapshot
 }
 
 func RunAgent(
@@ -84,12 +107,12 @@ func RunAgent(
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	metrics := &AgentMetrics{}
+	metrics := &SafeMetrics{}
 
 	go func() {
 		for range pollTicker.C {
 			pool.AddTask(func() {
-				collectMetrics(metrics, rand.Float64)
+				metrics.collect(rand.Float64)
 				log.Println("metrics collected")
 			})
 		}
@@ -97,7 +120,7 @@ func RunAgent(
 
 	for range reportTicker.C {
 		pool.AddTask(func() {
-			snapshot := *metrics
+			snapshot := metrics.Snapshot()
 
 			if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
 				pool.AddError(fmt.Errorf("metrics send error:%v", err))
