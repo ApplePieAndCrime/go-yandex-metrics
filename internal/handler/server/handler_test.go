@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -35,6 +36,78 @@ func newTestRouter(key string) http.Handler {
 	handlers := handler.NewHandler(services, loggerSugar, nil, key, nil)
 
 	return handlers.InitRoutes()
+}
+
+func TestUpdateMetricsByJSONPublishesAudit(t *testing.T) {
+	loggerSugar := logger.LoggerInitialize()
+	repo := repository.NewMemoryStorage()
+	services := service.NewService(repo)
+
+	publisher := &stubAuditPublisher{}
+	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher)
+	router := handlers.InitRoutes()
+
+	body, err := json.Marshal(models.Metrics{
+		ID:    "jsonCounter",
+		MType: models.Counter,
+		Delta: int64Ptr(5),
+	})
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
+	req.RemoteAddr = "192.168.0.42:1234"
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	assert.Len(t, publisher.events, 1)
+	assert.Equal(t, []string{"jsonCounter"}, publisher.events[0].Metrics)
+	assert.Equal(t, "192.168.0.42", publisher.events[0].IPAddress)
+}
+
+func TestBulkUpdateMetricsPublishesAuditForAllMetricNames(t *testing.T) {
+	loggerSugar := logger.LoggerInitialize()
+	repo := repository.NewMemoryStorage()
+	services := service.NewService(repo)
+
+	publisher := &stubAuditPublisher{}
+	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher)
+	router := handlers.InitRoutes()
+
+	body, err := json.Marshal([]models.Metrics{
+		{
+			ID:    "Alloc",
+			MType: models.Gauge,
+			Value: float64Ptr(1.5),
+		},
+		{
+			ID:    "Frees",
+			MType: models.Counter,
+			Delta: int64Ptr(2),
+		},
+	})
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	assert.Len(t, publisher.events, 1)
+	assert.Equal(t, []string{"Alloc", "Frees"}, publisher.events[0].Metrics)
+}
+
+type stubAuditPublisher struct {
+	events []audit.Event
+}
+
+func (s *stubAuditPublisher) Publish(_ context.Context, event audit.Event) error {
+	s.events = append(s.events, event)
+	return nil
 }
 
 func TestGetAllMetrics(t *testing.T) {

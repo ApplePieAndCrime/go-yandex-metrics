@@ -132,14 +132,16 @@ func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
 		return value
 	}
 
-	metrics := &AgentMetrics{}
+	safeMetrics := &SafeMetrics{}
 
-	collectMetrics(metrics, randomFloat)
-	_, err := sendAllMetrics(client, "http://example.com", metrics, "")
+	safeMetrics.collect(randomFloat)
+	snapshot := safeMetrics.Snapshot()
+	_, err := sendAllMetrics(client, "http://example.com", &snapshot, "")
 	require.NoError(t, err)
 
-	collectMetrics(metrics, randomFloat)
-	_, err = sendAllMetrics(client, "http://example.com", metrics, "")
+	safeMetrics.collect(randomFloat)
+	snapshot2 := safeMetrics.Snapshot()
+	_, err = sendAllMetrics(client, "http://example.com", &snapshot2, "")
 	require.NoError(t, err)
 
 	require.Len(t, sent["PollCount"], 2)

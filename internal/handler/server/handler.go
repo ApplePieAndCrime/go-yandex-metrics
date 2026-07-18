@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	zipper "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/gzip"
@@ -25,10 +26,17 @@ type Handler struct {
 	logger   *zap.SugaredLogger
 	db       *sql.DB
 	key      string
+	audit    audit.Publisher
 }
 
-func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string) *Handler {
-	return &Handler{services: services, logger: logger.With("component", "handler"), db: db, key: key}
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher) *Handler {
+	return &Handler{
+		services: services,
+		logger:   logger.With("component", "handler"),
+		db:       db,
+		key:      key,
+		audit:    auditPublisher,
+	}
 }
 
 func (h Handler) InitRoutes() *chi.Mux {
@@ -216,6 +224,7 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metricName)
 	} else {
 		newMetrics, createErr := h.services.CreateMetrics(metricName, metricType, delta, value)
 		if createErr != nil {
@@ -230,6 +239,7 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metricName)
 	}
 }
 
@@ -299,6 +309,7 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 
 		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metrics.ID)
 		return
 	}
 
@@ -327,6 +338,7 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+	h.publishAudit(req, metrics.ID)
 }
 
 func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
@@ -371,6 +383,7 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+	h.publishAudit(req, metricNames(updatedMetricsList)...)
 }
 
 func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
@@ -413,6 +426,25 @@ func isGzipBody(body []byte) bool {
 func writeError(w http.ResponseWriter, message string, statusCode int) {
 	w.WriteHeader(statusCode)
 	w.Write([]byte(message))
+}
+
+func (h *Handler) publishAudit(req *http.Request, metrics ...string) {
+	if h.audit == nil || len(metrics) == 0 {
+		return
+	}
+
+	if err := h.audit.Publish(req.Context(), audit.NewEvent(metrics, req)); err != nil {
+		h.logger.Warnw("audit publish failed", "error", err)
+	}
+}
+
+func metricNames(metricsList []models.Metrics) []string {
+	names := make([]string, 0, len(metricsList))
+	for _, metric := range metricsList {
+		names = append(names, metric.ID)
+	}
+
+	return names
 }
 
 type hashResponseWriter struct {

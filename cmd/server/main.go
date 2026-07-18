@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
@@ -86,8 +87,13 @@ func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 		loggerSugar.Infoln("Using key for authentication")
 	}
 
+	auditPublisher := audit.NewManager(
+		audit.NewFileObserver(flagConfig.AuditFile),
+		audit.NewHTTPObserver(flagConfig.AuditUrl, http.DefaultClient),
+	)
+
 	services := service.NewService(storage)
-	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key)
+	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher)
 
 	routes := handlers.InitRoutes()
 
