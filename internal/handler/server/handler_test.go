@@ -32,7 +32,7 @@ func newTestRouter(key string) http.Handler {
 	})
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar, nil, key)
+	handlers := handler.NewHandler(services, loggerSugar, nil, key, nil)
 
 	return handlers.InitRoutes()
 }

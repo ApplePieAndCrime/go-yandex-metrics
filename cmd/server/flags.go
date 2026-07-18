@@ -14,6 +14,8 @@ type FlagConfig struct {
 	IsRestore   bool   `env:"RESTORE"`
 	DatabaseDsn string `env:"DATABASE_DSN"`
 	Key         string `env:"KEY"`
+	AuditFile   string `env:"AUDIT_FILE"`
+	AuditUrl    string `env:"AUDIT_URL"`
 }
 
 func parseFlags() (*FlagConfig, error) {
@@ -24,6 +26,8 @@ func parseFlags() (*FlagConfig, error) {
 		IsRestore:   true,
 		DatabaseDsn: "",
 		Key:         "",
+		AuditFile:   "",
+		AuditUrl:    "",
 	}
 
 	err := env.Parse(&cfg)
@@ -39,6 +43,8 @@ func parseFlags() (*FlagConfig, error) {
 	flag.BoolVar(&cfg.IsRestore, "r", cfg.IsRestore, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
 	flag.StringVar(&cfg.DatabaseDsn, "d", cfg.DatabaseDsn, "строка подключения к базе данных")
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
+	flag.StringVar(&cfg.AuditFile, "-audit-file", cfg.AuditFile, "путь к файлу, в который сохраняются логи аудита")
+	flag.StringVar(&cfg.AuditUrl, "-audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
 
 	flag.Parse()
 
