@@ -42,3 +42,19 @@ git fetch template && git checkout template/v2 .github
 - **Clean Architecture**
 - **Hexagonal Architecture**
 - **Layered Architecture**
+
+## Бенчмарки и profiling
+
+Добавлены бенчмарки для хранилища метрик и HTTP-обработчика bulk update:
+
+```bash
+go test ./internal/repository -bench BenchmarkMemoryStorage -benchmem
+go test ./internal/handler/server -bench BenchmarkBulkUpdateMetrics -benchmem
+```
+
+Для профилирования использовался реалистичный непустой набор с обновлением counter:
+
+```bash
+go test ./internal/repository -bench BenchmarkMemoryStorage -benchmem -benchtime=100x -memprofile profiles/base.pprof
+```
+

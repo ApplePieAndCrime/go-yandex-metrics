@@ -18,6 +18,7 @@ import (
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func newTestRouter(key string) http.Handler {
@@ -306,6 +307,52 @@ func TestBulkUpdateMetrics(t *testing.T) {
 			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
 		})
 	}
+}
+
+func BenchmarkBulkUpdateMetrics(b *testing.B) {
+	router := newBenchmarkRouter()
+	metrics := make([]models.Metrics, 0, 100)
+
+	for i := 0; i < 50; i++ {
+		metrics = append(metrics, models.Metrics{
+			ID:    "benchGauge",
+			MType: models.Gauge,
+			Value: float64Ptr(float64(i)),
+		})
+		metrics = append(metrics, models.Metrics{
+			ID:    "benchCounter",
+			MType: models.Counter,
+			Delta: int64Ptr(int64(i + 1)),
+		})
+	}
+
+	body, err := json.Marshal(metrics)
+	assert.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		result := w.Result()
+		if result.StatusCode != http.StatusOK {
+			b.Fatalf("unexpected status: %d", result.StatusCode)
+		}
+	}
+}
+
+func newBenchmarkRouter() http.Handler {
+	repo := repository.NewMemoryStorage()
+	services := service.NewService(repo)
+	loggerSugar := zap.NewNop().Sugar()
+	handlers := handler.NewHandler(services, *loggerSugar, nil, "", nil)
+
+	return handlers.InitRoutes()
 }
 
 func TestUpdateMetrics(t *testing.T) {
