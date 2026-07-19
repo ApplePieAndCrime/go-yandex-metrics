@@ -63,6 +63,7 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 	return nil
 }
 
+// RunServer настраивает зависимости и запускает HTTP-сервер метрик.
 func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 
 	var storage repository.Storage

@@ -24,6 +24,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
+// AgentMetrics содержит снимок метрик среды выполнения и операционной системы.
 type AgentMetrics struct {
 	PollCount      int64
 	MemStats       runtime.MemStats
@@ -33,6 +34,7 @@ type AgentMetrics struct {
 	CPUutilization []float64
 }
 
+// SafeMetrics обеспечивает конкурентно-безопасное хранение снимка метрик агента.
 type SafeMetrics struct {
 	mu   sync.RWMutex
 	data AgentMetrics
@@ -60,6 +62,7 @@ func (m *SafeMetrics) collect(randomFloat func() float64) {
 	m.data.CPUutilization = cpuStats
 }
 
+// Snapshot возвращает независимую копию текущих метрик агента.
 func (m *SafeMetrics) Snapshot() AgentMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -74,6 +77,7 @@ func (m *SafeMetrics) Snapshot() AgentMetrics {
 	return snapshot
 }
 
+// RunAgent запускает периодический сбор и отправку метрик на сервер.
 func RunAgent(
 	externalAddress string,
 	pollCount int64,
@@ -141,6 +145,7 @@ func RunAgent(
 
 }
 
+// MemMetrics сопоставляет имени метрики её тип и строковое значение.
 type MemMetrics map[string]struct {
 	Type  string
 	Value string
@@ -237,6 +242,7 @@ func isRetriableRequestError(err error) bool {
 	return errors.As(err, &netErr)
 }
 
+// Unzip читает тело HTTP-ответа и при необходимости распаковывает gzip.
 func Unzip(resp *http.Response) ([]byte, error) {
 	var reader io.Reader = resp.Body
 
@@ -256,12 +262,14 @@ func Unzip(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// UpdatedMetrics содержит разобранные параметры обновления метрики.
 type UpdatedMetrics struct {
 	metricType  string
 	metricName  string
 	metricValue string
 }
 
+// SendRequestToServer отправляет набор метрик на эндпоинт пакетного обновления.
 func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/updates/", baseUrl)
 

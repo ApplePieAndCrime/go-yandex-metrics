@@ -7,6 +7,7 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
+// FlagConfig содержит параметры запуска агента.
 type FlagConfig struct {
 	ExternalAddress string `env:"ADDRESS"`
 	PollInterval    int64  `env:"POLL_INTERVAL"`

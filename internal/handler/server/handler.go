@@ -21,6 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Handler объединяет HTTP-обработчики сервера метрик и их зависимости.
 type Handler struct {
 	services *service.Service
 	logger   *zap.SugaredLogger
@@ -29,6 +30,7 @@ type Handler struct {
 	audit    audit.Publisher
 }
 
+// NewHandler создаёт набор HTTP-обработчиков сервера метрик.
 func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher) *Handler {
 	return &Handler{
 		services: services,
@@ -39,6 +41,7 @@ func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB,
 	}
 }
 
+// InitRoutes создаёт маршрутизатор со всеми эндпоинтами и middleware сервера.
 func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(loggerMiddleware.WithLogging(*h.logger))
@@ -60,6 +63,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 	return r
 }
 
+// Ping проверяет доступность подключения к базе данных.
 func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
 	if h.db == nil {
 		h.logger.Errorf("database is nil")
@@ -77,6 +81,7 @@ func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GetAllMetrics выводит все метрики в текстовом HTML-представлении.
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 
@@ -92,6 +97,7 @@ func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// GetMetricsByID возвращает значение метрики, заданной параметрами URL.
 func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	metricName := chi.URLParam(req, "metricName")
@@ -119,6 +125,7 @@ func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// GetMetricsByIDWithJSON возвращает метрику, имя и тип которой переданы в JSON.
 func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -166,6 +173,7 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 	w.Write(resp)
 }
 
+// UpdateMetrics создаёт или обновляет метрику по параметрам URL.
 func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
@@ -177,8 +185,6 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	metricType := chi.URLParam(req, "metricType")
 	metricName := chi.URLParam(req, "metricName")
 	metricValue := chi.URLParam(req, "metricValue")
-
-	fmt.Printf("metricType: %s metricName: %s metricValue: %s\r\n", metricType, metricName, metricValue)
 
 	if metricType == "" || metricName == "" {
 		w.WriteHeader(http.StatusNotFound)
@@ -243,6 +249,7 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// UpdateMetricsByJSON создаёт или обновляет метрику из JSON-тела запроса.
 func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -341,6 +348,7 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 	h.publishAudit(req, metrics.ID)
 }
 
+// BulkUpdateMetrics создаёт или обновляет набор метрик из JSON-массива.
 func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -472,6 +480,7 @@ func (w *hashResponseWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
 }
 
+// HashResponseMiddleware добавляет HMAC-SHA256 подпись к телу HTTP-ответа.
 func (h Handler) HashResponseMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if h.key == "" {

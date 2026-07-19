@@ -4,6 +4,7 @@ import (
 	"sync"
 )
 
+// Pool ограничивает число одновременно выполняемых задач.
 type Pool struct {
 	maxWorkers int
 	taskChan   chan func()
@@ -12,6 +13,7 @@ type Pool struct {
 	errors     []error
 }
 
+// NewPool создаёт пул с указанным числом обработчиков.
 func NewPool(maxWorkers int) *Pool {
 	return &Pool{
 		maxWorkers: maxWorkers,
@@ -19,6 +21,7 @@ func NewPool(maxWorkers int) *Pool {
 	}
 }
 
+// Start запускает обработчики задач.
 func (p *Pool) Start() {
 	for i := 0; i < p.maxWorkers; i++ {
 		p.wg.Add(1)
@@ -34,10 +37,12 @@ func (p *Pool) worker() {
 	}
 }
 
+// AddTask добавляет задачу в очередь на выполнение.
 func (p *Pool) AddTask(task func()) {
 	p.taskChan <- task
 }
 
+// AddError сохраняет ошибку, возникшую при выполнении задачи.
 func (p *Pool) AddError(err error) {
 	p.errMu.Lock()
 	defer p.errMu.Unlock()
@@ -45,6 +50,7 @@ func (p *Pool) AddError(err error) {
 	p.errors = append(p.errors, err)
 }
 
+// Errors возвращает копию накопленных ошибок.
 func (p *Pool) Errors() []error {
 	p.errMu.Lock()
 	defer p.errMu.Unlock()
@@ -55,10 +61,12 @@ func (p *Pool) Errors() []error {
 	return errCopy
 }
 
+// Close закрывает очередь задач.
 func (p *Pool) Close() {
 	close(p.taskChan)
 }
 
+// Wait ожидает завершения всех обработчиков.
 func (p *Pool) Wait() {
 	p.wg.Wait()
 }

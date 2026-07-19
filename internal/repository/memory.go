@@ -7,6 +7,7 @@ import (
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
+// MemoryStorage хранит метрики в памяти и безопасно работает при конкурентном доступе.
 type MemoryStorage struct {
 	metrics []models.Metrics
 	index   map[metricKey]int
@@ -18,6 +19,7 @@ type metricKey struct {
 	mType string
 }
 
+// NewMemoryStorage создаёт пустое хранилище метрик в памяти.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		metrics: make([]models.Metrics, 0, 2048),
@@ -25,6 +27,7 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
+// GetMetricsByID возвращает метрику по имени и типу, а также признак её наличия.
 func (s *MemoryStorage) GetMetricsByID(_ context.Context, id string, mType string) (*models.Metrics, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -37,6 +40,7 @@ func (s *MemoryStorage) GetMetricsByID(_ context.Context, id string, mType strin
 	return &s.metrics[i], true, nil
 }
 
+// GetAllMetrics возвращает копию всех сохранённых метрик.
 func (s *MemoryStorage) GetAllMetrics(_ context.Context) ([]models.Metrics, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -46,6 +50,7 @@ func (s *MemoryStorage) GetAllMetrics(_ context.Context) ([]models.Metrics, erro
 	return metricsCopy, nil
 }
 
+// SaveMetrics сохраняет метрику, суммируя счётчик или заменяя измеритель.
 func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (*models.Metrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

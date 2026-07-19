@@ -7,6 +7,7 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
+// FlagConfig содержит параметры запуска сервера.
 type FlagConfig struct {
 	RunAddress  string `env:"ADDRESS"`
 	Interval    int64  `env:"STORE_INTERVAL"`

@@ -11,24 +11,29 @@ import (
 	"sync"
 )
 
+// Event описывает событие изменения одной или нескольких метрик.
 type Event struct {
 	Timestamp int64    `json:"ts"`
 	Metrics   []string `json:"metrics"`
 	IPAddress string   `json:"ip_address"`
 }
 
+// Observer получает события аудита и передаёт их выбранному получателю.
 type Observer interface {
 	Notify(context.Context, Event) error
 }
 
+// Publisher публикует события аудита подписанным наблюдателям.
 type Publisher interface {
 	Publish(context.Context, Event) error
 }
 
+// Manager рассылает события аудита зарегистрированным наблюдателям.
 type Manager struct {
 	observers []Observer
 }
 
+// NewManager создаёт менеджер и исключает из списка пустых наблюдателей.
 func NewManager(observers ...Observer) *Manager {
 	filtered := make([]Observer, 0, len(observers))
 	for _, observer := range observers {
@@ -40,6 +45,7 @@ func NewManager(observers ...Observer) *Manager {
 	return &Manager{observers: filtered}
 }
 
+// Publish отправляет событие всем наблюдателям и объединяет полученные ошибки.
 func (m *Manager) Publish(ctx context.Context, event Event) error {
 	var errs []error
 
@@ -52,11 +58,13 @@ func (m *Manager) Publish(ctx context.Context, event Event) error {
 	return errors.Join(errs...)
 }
 
+// FileObserver записывает события аудита в файл в формате JSON Lines.
 type FileObserver struct {
 	path string
 	mu   sync.Mutex
 }
 
+// NewFileObserver создаёт файловый наблюдатель или возвращает nil для пустого пути.
 func NewFileObserver(path string) *FileObserver {
 	if path == "" {
 		return nil
@@ -65,6 +73,7 @@ func NewFileObserver(path string) *FileObserver {
 	return &FileObserver{path: path}
 }
 
+// Notify добавляет событие аудита в файл.
 func (o *FileObserver) Notify(_ context.Context, event Event) error {
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -87,15 +96,18 @@ func (o *FileObserver) Notify(_ context.Context, event Event) error {
 	return nil
 }
 
+// HTTPClient задаёт минимальный интерфейс клиента для отправки событий аудита.
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+// HTTPObserver отправляет события аудита на HTTP-эндпоинт.
 type HTTPObserver struct {
 	url    string
 	client HTTPClient
 }
 
+// NewHTTPObserver создаёт HTTP-наблюдатель или возвращает nil для пустого URL.
 func NewHTTPObserver(url string, client HTTPClient) *HTTPObserver {
 	if url == "" {
 		return nil
@@ -111,6 +123,7 @@ func NewHTTPObserver(url string, client HTTPClient) *HTTPObserver {
 	}
 }
 
+// Notify отправляет событие POST-запросом в формате JSON.
 func (o *HTTPObserver) Notify(ctx context.Context, event Event) error {
 	payload, err := json.Marshal(event)
 	if err != nil {

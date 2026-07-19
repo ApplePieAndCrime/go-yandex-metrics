@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// NewEvent создаёт событие аудита для изменённых метрик и HTTP-запроса.
 func NewEvent(metricNames []string, req *http.Request) Event {
 	return Event{
 		Timestamp: time.Now().Unix(),

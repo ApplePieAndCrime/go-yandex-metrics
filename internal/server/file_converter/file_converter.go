@@ -10,16 +10,19 @@ import (
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 )
 
+// Producer атомарно записывает список метрик в файл.
 type Producer struct {
 	filename string
 }
 
+// NewProducer создаёт объект для записи метрик в указанный файл.
 func NewProducer(filename string) (*Producer, error) {
 	return &Producer{
 		filename: filename,
 	}, nil
 }
 
+// WriteEvent записывает список метрик в файл в формате JSON.
 func (p *Producer) WriteEvent(metricsList []models.Metrics) error {
 	dir := filepath.Dir(p.filename)
 	pattern := filepath.Base(p.filename) + ".tmp-*"
@@ -52,15 +55,18 @@ func (p *Producer) WriteEvent(metricsList []models.Metrics) error {
 	return os.Rename(tempFilename, p.filename)
 }
 
+// Close завершает работу объекта записи.
 func (p *Producer) Close() error {
 	return nil
 }
 
+// Consumer читает список метрик из JSON-файла.
 type Consumer struct {
 	file    *os.File
 	decoder *json.Decoder
 }
 
+// NewConsumer открывает файл для чтения метрик.
 func NewConsumer(filename string) (*Consumer, error) {
 	// откройте файл и создайте для него json.Decoder
 	// допишите код здесь
@@ -75,6 +81,7 @@ func NewConsumer(filename string) (*Consumer, error) {
 	}, nil
 }
 
+// ReadMetricsList декодирует список метрик из файла.
 func (c *Consumer) ReadMetricsList() ([]models.Metrics, error) {
 	var metricsList []models.Metrics
 	if err := c.decoder.Decode(&metricsList); err != nil {
@@ -86,6 +93,7 @@ func (c *Consumer) ReadMetricsList() ([]models.Metrics, error) {
 	return metricsList, nil
 }
 
+// Close закрывает файл с метриками.
 func (c *Consumer) Close() error {
 	return c.file.Close()
 }
