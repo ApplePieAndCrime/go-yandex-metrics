@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
@@ -21,10 +25,10 @@ import (
 func main() {
 	loggerSugar := logger.LoggerInitialize()
 	flagConfig, err := parseFlags()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	log.Println("SERVER CONFIG ", flagConfig)
-
-	err = RunServer(*flagConfig, loggerSugar)
+	err = RunServer(ctx, *flagConfig, loggerSugar)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +68,7 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 }
 
 // RunServer настраивает зависимости и запускает HTTP-сервер метрик.
-func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
+func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 
 	var storage repository.Storage
 	var db *sql.DB
@@ -75,6 +79,7 @@ func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 		if err != nil {
 			return err
 		}
+		defer db.Close()
 		if err := migrateDb(flagConfig, loggerSugar); err != nil {
 			return err
 		}
@@ -92,6 +97,11 @@ func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 		audit.NewFileObserver(flagConfig.AuditFile),
 		audit.NewHTTPObserver(flagConfig.AuditUrl, http.DefaultClient),
 	)
+	defer func() {
+		if err := auditPublisher.Close(); err != nil {
+			loggerSugar.Errorw("failed to close audit publisher", "error", err)
+		}
+	}()
 
 	services := service.NewService(storage)
 	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher)
@@ -107,6 +117,25 @@ func RunServer(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 		}()
 	}
 
+	httpServer := &http.Server{
+		Addr:    flagConfig.RunAddress,
+		Handler: routes,
+	}
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- httpServer.ListenAndServe()
+	}()
+
 	log.Println("Server is running on address:", flagConfig.RunAddress)
-	return http.ListenAndServe(flagConfig.RunAddress, routes)
+	select {
+	case err := <-serverErrors:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return httpServer.Shutdown(shutdownCtx)
+	}
 }

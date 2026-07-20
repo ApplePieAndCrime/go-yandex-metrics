@@ -3,6 +3,7 @@ package internal_agent
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,7 +47,10 @@ var retryIntervals = []time.Duration{
 	5 * time.Second,
 }
 
-func (m *SafeMetrics) collect(randomFloat func() float64) {
+func (m *SafeMetrics) collect(randomFloat func() float64) error {
+	memStats, memErr := mem.VirtualMemory()
+	cpuStats, cpuErr := cpu.Percent(0, true)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -54,12 +58,16 @@ func (m *SafeMetrics) collect(randomFloat func() float64) {
 	m.data.PollCount++
 	m.data.RandomValue = randomFloat()
 
-	memStats, _ := mem.VirtualMemory()
-	m.data.TotalMemory = memStats.Total
-	m.data.FreeMemory = memStats.Free
+	if memErr == nil && memStats != nil {
+		m.data.TotalMemory = memStats.Total
+		m.data.FreeMemory = memStats.Free
+	}
 
-	cpuStats, _ := cpu.Percent(0, true)
-	m.data.CPUutilization = cpuStats
+	if cpuErr == nil {
+		m.data.CPUutilization = append(m.data.CPUutilization[:0], cpuStats...)
+	}
+
+	return errors.Join(memErr, cpuErr)
 }
 
 // Snapshot возвращает независимую копию текущих метрик агента.
@@ -79,22 +87,26 @@ func (m *SafeMetrics) Snapshot() AgentMetrics {
 
 // RunAgent запускает периодический сбор и отправку метрик на сервер.
 func RunAgent(
+	ctx context.Context,
 	externalAddress string,
 	pollCount int64,
 	reportInterval int64,
 	key string,
 	rateLimit int,
 ) error {
-	// Даём серверу время на запуск (2 секунды достаточно)
-	time.Sleep(2 * time.Second)
+	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
+	startupTimer := time.NewTimer(2 * time.Second)
+	select {
+	case <-ctx.Done():
+		if !startupTimer.Stop() {
+			<-startupTimer.C
+		}
+		return nil
+	case <-startupTimer.C:
+	}
 
 	pool := workerPool.NewPool(rateLimit)
 	pool.Start()
-
-	defer func() {
-		pool.Close()
-		pool.Wait()
-	}()
 
 	currentPollInterval := time.Duration(pollCount) * time.Second
 	currentReportInterval := time.Duration(reportInterval) * time.Second
@@ -113,36 +125,38 @@ func RunAgent(
 
 	metrics := &SafeMetrics{}
 
-	go func() {
-		for range pollTicker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			pool.Close()
+			pool.Wait()
+
+			if poolErrors := pool.Errors(); len(poolErrors) > 0 {
+				return fmt.Errorf("errors: %v", poolErrors)
+			}
+			return nil
+
+		case <-pollTicker.C:
 			pool.AddTask(func() {
-				metrics.collect(rand.Float64)
+				if err := metrics.collect(rand.Float64); err != nil {
+					log.Printf("metrics collection error: %v", err)
+					return
+				}
 				log.Println("metrics collected")
 			})
+
+		case <-reportTicker.C:
+			pool.AddTask(func() {
+				snapshot := metrics.Snapshot()
+
+				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
+					pool.AddError(fmt.Errorf("metrics send error: %w", err))
+					return
+				}
+				log.Println("metrics sent")
+			})
 		}
-	}()
-
-	for range reportTicker.C {
-		pool.AddTask(func() {
-			snapshot := metrics.Snapshot()
-
-			if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
-				pool.AddError(fmt.Errorf("metrics send error:%v", err))
-				return
-			}
-			log.Println("metrics sent")
-		})
 	}
-
-	pool.Wait()
-
-	errors := pool.Errors()
-	if len(errors) > 0 {
-		return fmt.Errorf("errors: %v", errors)
-	}
-
-	return nil
-
 }
 
 // MemMetrics сопоставляет имени метрики её тип и строковое значение.

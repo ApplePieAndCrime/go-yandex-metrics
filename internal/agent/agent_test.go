@@ -1,6 +1,7 @@
 package internal_agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +16,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunAgentStopsWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, RunAgent(ctx, "http://example.com", 1, 1, "", 1))
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

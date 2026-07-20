@@ -37,7 +37,8 @@ func (s *MemoryStorage) GetMetricsByID(_ context.Context, id string, mType strin
 		return nil, false, nil
 	}
 
-	return &s.metrics[i], true, nil
+	metricCopy := cloneMetric(s.metrics[i])
+	return &metricCopy, true, nil
 }
 
 // GetAllMetrics возвращает копию всех сохранённых метрик.
@@ -46,7 +47,9 @@ func (s *MemoryStorage) GetAllMetrics(_ context.Context) ([]models.Metrics, erro
 	defer s.mu.RUnlock()
 
 	metricsCopy := make([]models.Metrics, len(s.metrics))
-	copy(metricsCopy, s.metrics)
+	for i := range s.metrics {
+		metricsCopy[i] = cloneMetric(s.metrics[i])
+	}
 	return metricsCopy, nil
 }
 
@@ -69,7 +72,8 @@ func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (
 			valueCopy := *metrics.Value
 			s.metrics[i].Value = &valueCopy
 		}
-		return &s.metrics[i], nil
+		metricCopy := cloneMetric(s.metrics[i])
+		return &metricCopy, nil
 	}
 
 	if metrics.Delta != nil {
@@ -83,5 +87,19 @@ func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (
 
 	s.metrics = append(s.metrics, metrics)
 	s.index[key] = len(s.metrics) - 1
-	return &s.metrics[len(s.metrics)-1], nil
+	metricCopy := cloneMetric(s.metrics[len(s.metrics)-1])
+	return &metricCopy, nil
+}
+
+func cloneMetric(metric models.Metrics) models.Metrics {
+	if metric.Delta != nil {
+		delta := *metric.Delta
+		metric.Delta = &delta
+	}
+	if metric.Value != nil {
+		value := *metric.Value
+		metric.Value = &value
+	}
+
+	return metric
 }

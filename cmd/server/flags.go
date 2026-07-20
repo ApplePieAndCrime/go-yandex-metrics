@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"log"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -35,8 +34,6 @@ func parseFlags() (*FlagConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	log.Println("SERVER CONFIG ", cfg)
 
 	flag.StringVar(&cfg.RunAddress, "a", cfg.RunAddress, "адрес для старта сервера")
 	flag.Int64Var(&cfg.Interval, "i", cfg.Interval, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
