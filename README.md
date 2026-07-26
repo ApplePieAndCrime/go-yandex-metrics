@@ -69,3 +69,8 @@ go test ./internal/repository -bench BenchmarkMemoryStorage -benchmem -benchtime
 BenchmarkMemoryStorageSaveMetrics-10        301952 ns/op   584009 B/op   11012 allocs/op
 BenchmarkMemoryStorageGetMetricsByID-10        131.2 ns/op       72 B/op       2 allocs/op
 ```
+
+## Прогон linter
+```bash
+go run ./cmd/linter ./...
+```

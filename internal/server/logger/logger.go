@@ -11,7 +11,7 @@ import (
 func LoggerInitialize() zap.SugaredLogger {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
-		panic(err)
+		return *zap.NewNop().Sugar()
 	}
 
 	defer logger.Sync()

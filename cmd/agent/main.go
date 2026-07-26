@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"os/signal"
 	"syscall"
 
@@ -9,11 +10,14 @@ import (
 )
 
 func main() {
-	flagConfig := parseFlags()
+	flagConfig, err := parseFlags()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	err := internal_agent.RunAgent(
+	err = internal_agent.RunAgent(
 		ctx,
 		flagConfig.ExternalAddress,
 		flagConfig.PollInterval,
@@ -23,6 +27,6 @@ func main() {
 	)
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
