@@ -6,9 +6,9 @@ import (
 )
 
 func forbidden() {
-	panic("boom")
-	logging.Fatal("fatal")
-	operatingsystem.Exit(1)
+	panic("boom")           // want "использование встроенной функции panic запрещено"
+	logging.Fatal("fatal")  // want "вызов log.Fatal разрешён только в функции main пакета main"
+	operatingsystem.Exit(1) // want "вызов os.Exit разрешён только в функции main пакета main"
 }
 
 func notPackageCalls() {

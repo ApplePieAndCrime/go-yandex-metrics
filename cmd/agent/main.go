@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os/signal"
 	"syscall"
@@ -9,7 +10,13 @@ import (
 	internal_agent "github.com/ApplePieAndCrime/go-yandex-metrics/internal/agent"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
 func main() {
+	printBuildInfo()
+
 	flagConfig, err := parseFlags()
 	if err != nil {
 		log.Fatal(err)
@@ -29,4 +36,21 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func printBuildInfo() {
+	version := buildVersion
+	if version == "" {
+		version = "N/A"
+	}
+	date := buildDate
+	if date == "" {
+		date = "N/A"
+	}
+	commit := buildCommit
+	if commit == "" {
+		commit = "N/A"
+	}
+
+	fmt.Printf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", version, date, commit)
 }

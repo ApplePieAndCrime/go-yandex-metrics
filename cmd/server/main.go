@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -22,7 +23,13 @@ import (
 	"go.uber.org/zap"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
 func main() {
+	printBuildInfo()
+
 	loggerSugar := logger.LoggerInitialize()
 	flagConfig, err := parseFlags()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -32,6 +39,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func printBuildInfo() {
+	version := buildVersion
+	if version == "" {
+		version = "N/A"
+	}
+	date := buildDate
+	if date == "" {
+		date = "N/A"
+	}
+	commit := buildCommit
+	if commit == "" {
+		commit = "N/A"
+	}
+
+	fmt.Printf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", version, date, commit)
 }
 
 func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
