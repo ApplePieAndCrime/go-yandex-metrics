@@ -3,6 +3,7 @@ package internal_agent
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,13 +18,27 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
+	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
+// AgentMetrics содержит снимок метрик среды выполнения и операционной системы.
 type AgentMetrics struct {
-	PollCount   int64
-	MemStats    runtime.MemStats
-	RandomValue float64
+	PollCount      int64
+	MemStats       runtime.MemStats
+	RandomValue    float64
+	TotalMemory    uint64
+	FreeMemory     uint64
+	CPUutilization []float64
+}
+
+// SafeMetrics обеспечивает конкурентно-безопасное хранение снимка метрик агента.
+type SafeMetrics struct {
+	mu   sync.RWMutex
+	data AgentMetrics
 }
 
 var retryIntervals = []time.Duration{
@@ -32,18 +47,69 @@ var retryIntervals = []time.Duration{
 	5 * time.Second,
 }
 
-func collectMetrics(metrics *AgentMetrics, randomFloat func() float64) {
-	runtime.ReadMemStats(&metrics.MemStats)
-	metrics.PollCount++
-	metrics.RandomValue = randomFloat()
+func (m *SafeMetrics) collect(randomFloat func() float64) error {
+	memStats, memErr := mem.VirtualMemory()
+	cpuStats, cpuErr := cpu.Percent(0, true)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime.ReadMemStats(&m.data.MemStats)
+	m.data.PollCount++
+	m.data.RandomValue = randomFloat()
+
+	if memErr == nil && memStats != nil {
+		m.data.TotalMemory = memStats.Total
+		m.data.FreeMemory = memStats.Free
+	}
+
+	if cpuErr == nil {
+		m.data.CPUutilization = append(m.data.CPUutilization[:0], cpuStats...)
+	}
+
+	return errors.Join(memErr, cpuErr)
 }
 
-func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) error {
-	// Даём серверу время на запуск (2 секунды достаточно)
-	time.Sleep(2 * time.Second)
+// Snapshot возвращает независимую копию текущих метрик агента.
+func (m *SafeMetrics) Snapshot() AgentMetrics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	currentPollInterval := time.Duration(*pollCount) * time.Second
-	currentReportInterval := time.Duration(*reportInterval) * time.Second
+	snapshot := m.data
+
+	snapshot.CPUutilization = append(
+		[]float64(nil),
+		m.data.CPUutilization...,
+	)
+
+	return snapshot
+}
+
+// RunAgent запускает периодический сбор и отправку метрик на сервер.
+func RunAgent(
+	ctx context.Context,
+	externalAddress string,
+	pollCount int64,
+	reportInterval int64,
+	key string,
+	rateLimit int,
+) error {
+	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
+	startupTimer := time.NewTimer(2 * time.Second)
+	select {
+	case <-ctx.Done():
+		if !startupTimer.Stop() {
+			<-startupTimer.C
+		}
+		return nil
+	case <-startupTimer.C:
+	}
+
+	pool := workerPool.NewPool(rateLimit)
+	pool.Start()
+
+	currentPollInterval := time.Duration(pollCount) * time.Second
+	currentReportInterval := time.Duration(reportInterval) * time.Second
 
 	client := &http.Client{
 		Timeout: currentReportInterval,
@@ -57,38 +123,49 @@ func RunAgent(externalAddress *string, pollCount *int64, reportInterval *int64) 
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	metrics := &AgentMetrics{}
-	var mu sync.RWMutex
+	metrics := &SafeMetrics{}
 
-	go func() {
-		for range pollTicker.C {
-			mu.Lock()
-			collectMetrics(metrics, rand.Float64)
-			mu.Unlock()
-			log.Println("metrics collected")
+	for {
+		select {
+		case <-ctx.Done():
+			pool.Close()
+			pool.Wait()
+
+			if poolErrors := pool.Errors(); len(poolErrors) > 0 {
+				return fmt.Errorf("errors: %v", poolErrors)
+			}
+			return nil
+
+		case <-pollTicker.C:
+			pool.AddTask(func() {
+				if err := metrics.collect(rand.Float64); err != nil {
+					log.Printf("metrics collection error: %v", err)
+					return
+				}
+				log.Println("metrics collected")
+			})
+
+		case <-reportTicker.C:
+			pool.AddTask(func() {
+				snapshot := metrics.Snapshot()
+
+				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
+					pool.AddError(fmt.Errorf("metrics send error: %w", err))
+					return
+				}
+				log.Println("metrics sent")
+			})
 		}
-	}()
-
-	for range reportTicker.C {
-		mu.RLock()
-		snapshot := *metrics
-		mu.RUnlock()
-
-		if _, err := sendAllMetricsWithRetry(client, *externalAddress, &snapshot, time.Sleep); err != nil {
-			log.Println("metrics send error:", err)
-			continue
-		}
-		log.Println("metrics sent")
 	}
-	return nil
 }
 
+// MemMetrics сопоставляет имени метрики её тип и строковое значение.
 type MemMetrics map[string]struct {
 	Type  string
 	Value string
 }
 
-func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) ([]byte, error) {
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string) ([]byte, error) {
 
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
@@ -120,8 +197,22 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 		"TotalAlloc":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.TotalAlloc)},
 		"RandomValue":   {Type: "gauge", Value: fmt.Sprintf("%f", metrics.RandomValue)},
 		"PollCount":     {Type: "counter", Value: fmt.Sprintf("%d", metrics.PollCount)},
+		"TotalMemory":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.TotalMemory)},
+		"FreeMemory":    {Type: "gauge", Value: fmt.Sprintf("%d", metrics.FreeMemory)},
 	}
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics)
+
+	for i, cpuUtil := range metrics.CPUutilization {
+		metricName := fmt.Sprintf("CPUutilization%d", i+1)
+		memMetrics[metricName] = struct {
+			Type  string
+			Value string
+		}{
+			Type:  "gauge",
+			Value: fmt.Sprintf("%f", cpuUtil),
+		}
+	}
+
+	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +226,11 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics) 
 	return resBody, nil
 }
 
-func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration)) ([]byte, error) {
+func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string) ([]byte, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
-		resBody, err := sendAllMetrics(client, baseUrl, metrics)
+		resBody, err := sendAllMetrics(client, baseUrl, metrics, key)
 		if err == nil {
 			return resBody, nil
 		}
@@ -165,6 +256,7 @@ func isRetriableRequestError(err error) bool {
 	return errors.As(err, &netErr)
 }
 
+// Unzip читает тело HTTP-ответа и при необходимости распаковывает gzip.
 func Unzip(resp *http.Response) ([]byte, error) {
 	var reader io.Reader = resp.Body
 
@@ -184,13 +276,15 @@ func Unzip(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// UpdatedMetrics содержит разобранные параметры обновления метрики.
 type UpdatedMetrics struct {
 	metricType  string
 	metricName  string
 	metricValue string
 }
 
-func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics) (*http.Response, int, error) {
+// SendRequestToServer отправляет набор метрик на эндпоинт пакетного обновления.
+func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/updates/", baseUrl)
 
 	var payload []models.Metrics
@@ -232,6 +326,10 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if key != "" {
+		req.Header.Set(hashutil.HeaderName, hashutil.SignBody(body, key))
+	}
 
 	resp, err := client.Do(req)
 

@@ -7,22 +7,27 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 )
 
+// Service содержит прикладные операции над метриками.
 type Service struct {
 	storage repository.Storage
 }
 
+// NewService создаёт сервис с указанным хранилищем.
 func NewService(storage repository.Storage) *Service {
 	return &Service{storage: storage}
 }
 
+// GetAllMetrics возвращает все сохранённые метрики.
 func (s *Service) GetAllMetrics() ([]models.Metrics, error) {
 	return s.storage.GetAllMetrics(context.Background())
 }
 
+// GetMetricsByID возвращает метрику по имени и типу.
 func (s *Service) GetMetricsByID(id string, mType string) (*models.Metrics, bool, error) {
 	return s.storage.GetMetricsByID(context.Background(), id, mType)
 }
 
+// UpdateMetrics обновляет существующую метрику переданным значением.
 func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, value float64) (*models.Metrics, error) {
 	updated := models.Metrics{
 		ID:    existingMetric.ID,
@@ -39,10 +44,12 @@ func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, val
 	return s.storage.SaveMetrics(context.Background(), updated)
 }
 
+// CreateOrUpdateMetrics сохраняет готовую модель метрики.
 func (s *Service) CreateOrUpdateMetrics(metrics models.Metrics) (*models.Metrics, error) {
 	return s.storage.SaveMetrics(context.Background(), metrics)
 }
 
+// CreateMetrics создаёт метрику указанного имени и типа.
 func (s *Service) CreateMetrics(metricName string, metricType string, delta int64, value float64) (*models.Metrics, error) {
 	newMetrics := models.Metrics{
 		ID:    metricName,

@@ -8,6 +8,7 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 )
 
+// SaveMetricsToFile восстанавливает метрики из файла и запускает их периодическое сохранение.
 func SaveMetricsToFile(
 	services service.Service,
 	storeInterval int64,

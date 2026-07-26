@@ -11,16 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// PostgresStorage хранит метрики в базе данных PostgreSQL.
 type PostgresStorage struct {
 	db *sql.DB
 }
 
 var retrySleep = time.Sleep
 
+// NewPostgresStorage создаёт хранилище, использующее указанное подключение к базе данных.
 func NewPostgresStorage(db *sql.DB) *PostgresStorage {
 	return &PostgresStorage{db: db}
 }
 
+// GetMetricsByID возвращает метрику по имени и типу, повторяя запрос при временном сбое соединения.
 func (s *PostgresStorage) GetMetricsByID(ctx context.Context, id string, mType string) (*models.Metrics, bool, error) {
 	return withRetry(func() (*models.Metrics, bool, error) {
 		row := s.db.QueryRowContext(
@@ -43,6 +46,7 @@ func (s *PostgresStorage) GetMetricsByID(ctx context.Context, id string, mType s
 	})
 }
 
+// GetAllMetrics возвращает все метрики из базы данных.
 func (s *PostgresStorage) GetAllMetrics(ctx context.Context) ([]models.Metrics, error) {
 	return withRetryValue(func() ([]models.Metrics, error) {
 		rows, err := s.db.QueryContext(ctx, `SELECT id, mtype, delta, value FROM metrics`)
@@ -69,6 +73,7 @@ func (s *PostgresStorage) GetAllMetrics(ctx context.Context) ([]models.Metrics, 
 	})
 }
 
+// SaveMetrics создаёт или обновляет метрику в базе данных.
 func (s *PostgresStorage) SaveMetrics(ctx context.Context, metrics models.Metrics) (*models.Metrics, error) {
 	switch metrics.MType {
 	case models.Counter:

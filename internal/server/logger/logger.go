@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// LoggerInitialize создаёт логгер для режима разработки.
 func LoggerInitialize() zap.SugaredLogger {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
@@ -39,6 +40,7 @@ func (r *responseData) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// WithLogging возвращает middleware, записывающий параметры HTTP-запроса и ответа.
 func WithLogging(logger zap.SugaredLogger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		logFn := func(w http.ResponseWriter, r *http.Request) {

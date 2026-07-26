@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	zipper "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/gzip"
 	loggerMiddleware "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
@@ -18,20 +21,32 @@ import (
 	"go.uber.org/zap"
 )
 
+// Handler объединяет HTTP-обработчики сервера метрик и их зависимости.
 type Handler struct {
 	services *service.Service
 	logger   *zap.SugaredLogger
 	db       *sql.DB
+	key      string
+	audit    audit.Publisher
 }
 
-func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB) *Handler {
-	return &Handler{services: services, logger: logger.With("component", "handler"), db: db}
+// NewHandler создаёт набор HTTP-обработчиков сервера метрик.
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher) *Handler {
+	return &Handler{
+		services: services,
+		logger:   logger.With("component", "handler"),
+		db:       db,
+		key:      key,
+		audit:    auditPublisher,
+	}
 }
 
+// InitRoutes создаёт маршрутизатор со всеми эндпоинтами и middleware сервера.
 func (h Handler) InitRoutes() *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(loggerMiddleware.WithLogging(*h.logger))
 	r.Use(zipper.ZipMiddleware)
+	r.Use(h.HashResponseMiddleware)
 
 	r.Route("/", func(r chi.Router) {
 		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
@@ -48,6 +63,7 @@ func (h Handler) InitRoutes() *chi.Mux {
 	return r
 }
 
+// Ping проверяет доступность подключения к базе данных.
 func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
 	if h.db == nil {
 		h.logger.Errorf("database is nil")
@@ -65,7 +81,10 @@ func (h *Handler) Ping(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GetAllMetrics выводит все метрики в текстовом HTML-представлении.
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+
 	metricsList, err := h.services.GetAllMetrics()
 	if err != nil {
 		h.logger.Errorln("error fetching all metrics: ", err)
@@ -73,14 +92,12 @@ func (h *Handler) GetAllMetrics(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	w.WriteHeader(http.StatusOK)
-
 	for _, metric := range metricsList {
-		io.WriteString(w, fmt.Sprintf("%+v\n", metric))
+		_, _ = io.WriteString(w, fmt.Sprintf("%+v\n", metric))
 	}
 }
 
+// GetMetricsByID возвращает значение метрики, заданной параметрами URL.
 func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	metricName := chi.URLParam(req, "metricName")
@@ -100,33 +117,33 @@ func (h *Handler) GetMetricsByID(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}
 
-	w.WriteHeader(http.StatusOK)
 	switch existingMetric.MType {
 	case models.Counter:
-		io.WriteString(w, strconv.FormatInt(*existingMetric.Delta, 10))
+		_, _ = io.WriteString(w, strconv.FormatInt(*existingMetric.Delta, 10))
 	case models.Gauge:
-		io.WriteString(w, strconv.FormatFloat(*existingMetric.Value, 'f', -1, 64))
+		_, _ = io.WriteString(w, strconv.FormatFloat(*existingMetric.Value, 'f', -1, 64))
 	}
 }
 
+// GetMetricsByIDWithJSON возвращает метрику, имя и тип которой переданы в JSON.
 func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
 	var metrics models.Metrics
-	var buf bytes.Buffer
-	// читаем тело запроса
-	_, err := buf.ReadFrom(req.Body)
-
-	defer req.Body.Close()
-
+	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		h.logger.Errorln("buffer err: ", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// десериализуем JSON в Visitor
-	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
+
+	if len(body) == 0 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	if err = json.Unmarshal(body, &metrics); err != nil {
 		h.logger.Errorln("unmarshal err: ", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -146,17 +163,17 @@ func (h *Handler) GetMetricsByIDWithJSON(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-
 	resp, err := json.Marshal(*existingMetrics)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }
 
+// UpdateMetrics создаёт или обновляет метрику по параметрам URL.
 func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
@@ -168,8 +185,6 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	metricType := chi.URLParam(req, "metricType")
 	metricName := chi.URLParam(req, "metricName")
 	metricValue := chi.URLParam(req, "metricValue")
-
-	fmt.Printf("metricType: %s metricName: %s metricValue: %s\r\n", metricType, metricName, metricValue)
 
 	if metricType == "" || metricName == "" {
 		w.WriteHeader(http.StatusNotFound)
@@ -207,50 +222,46 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 	if exists {
 		h.services.UpdateMetrics(existingMetric, delta, value)
-		w.WriteHeader(http.StatusOK)
-
 		resp, err := json.Marshal(existingMetric)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metricName)
 	} else {
 		newMetrics, createErr := h.services.CreateMetrics(metricName, metricType, delta, value)
 		if createErr != nil {
 			http.Error(w, createErr.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-
 		resp, err := json.Marshal(newMetrics)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metricName)
 	}
 }
 
+// UpdateMetricsByJSON создаёт или обновляет метрику из JSON-тела запроса.
 func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var metrics models.Metrics
-	var buf bytes.Buffer
-
-	_, err := buf.ReadFrom(req.Body)
-
-	defer req.Body.Close()
-
+	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err = json.Unmarshal(buf.Bytes(), &metrics); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err = json.Unmarshal(body, &metrics); err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -296,7 +307,6 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 		}
 
 		h.services.UpdateMetrics(existingMetric, delta, value)
-		w.WriteHeader(http.StatusOK)
 
 		resp, err := json.Marshal(existingMetric)
 		if err != nil {
@@ -304,7 +314,9 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 			return
 		}
 
+		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
+		h.publishAudit(req, metrics.ID)
 		return
 	}
 
@@ -333,30 +345,27 @@ func (h *Handler) UpdateMetricsByJSON(w http.ResponseWriter, req *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+	h.publishAudit(req, metrics.ID)
 }
 
+// BulkUpdateMetrics создаёт или обновляет набор метрик из JSON-массива.
 func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var metricsList []models.Metrics
-	var buf bytes.Buffer
-
-	_, err := buf.ReadFrom(req.Body)
-
-	defer req.Body.Close()
-
+	body, err := h.readAndVerifyRequestBody(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err = json.Unmarshal(buf.Bytes(), &metricsList); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err = json.Unmarshal(body, &metricsList); err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if len(metricsList) == 0 {
-		http.Error(w, "Пустой массив", http.StatusBadRequest)
+		writeError(w, "Пустой массив", http.StatusBadRequest)
 		return
 	}
 	var updatedMetricsList []models.Metrics
@@ -382,4 +391,114 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+	h.publishAudit(req, metricNames(updatedMetricsList)...)
+}
+
+func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
+	defer req.Body.Close()
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if isGzipBody(body) {
+		gz, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+
+		body, err = io.ReadAll(gz)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if h.key == "" {
+		return body, nil
+	}
+
+	receivedHash := req.Header.Get(hashutil.HeaderName)
+	if receivedHash != "" && !hashutil.VerifySignature(body, receivedHash, h.key) {
+		return nil, fmt.Errorf("invalid request hash")
+	}
+
+	return body, nil
+}
+
+func isGzipBody(body []byte) bool {
+	return len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b
+}
+
+func writeError(w http.ResponseWriter, message string, statusCode int) {
+	w.WriteHeader(statusCode)
+	w.Write([]byte(message))
+}
+
+func (h *Handler) publishAudit(req *http.Request, metrics ...string) {
+	if h.audit == nil || len(metrics) == 0 {
+		return
+	}
+
+	if err := h.audit.Publish(req.Context(), audit.NewEvent(metrics, req)); err != nil {
+		h.logger.Warnw("audit publish failed", "error", err)
+	}
+}
+
+func metricNames(metricsList []models.Metrics) []string {
+	names := make([]string, 0, len(metricsList))
+	for _, metric := range metricsList {
+		names = append(names, metric.ID)
+	}
+
+	return names
+}
+
+type hashResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newHashResponseWriter() *hashResponseWriter {
+	return &hashResponseWriter{
+		header: make(http.Header),
+		status: http.StatusOK,
+	}
+}
+
+func (w *hashResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *hashResponseWriter) Write(body []byte) (int, error) {
+	return w.body.Write(body)
+}
+
+func (w *hashResponseWriter) WriteHeader(statusCode int) {
+	w.status = statusCode
+}
+
+// HashResponseMiddleware добавляет HMAC-SHA256 подпись к телу HTTP-ответа.
+func (h Handler) HashResponseMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if h.key == "" {
+			next.ServeHTTP(w, req)
+			return
+		}
+
+		buffered := newHashResponseWriter()
+		next.ServeHTTP(buffered, req)
+
+		for key, values := range buffered.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+
+		w.Header().Set(hashutil.HeaderName, hashutil.SignBody(buffered.body.Bytes(), h.key))
+		w.WriteHeader(buffered.status)
+		_, _ = w.Write(buffered.body.Bytes())
+	})
 }
