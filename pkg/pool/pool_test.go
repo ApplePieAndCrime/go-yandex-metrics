@@ -37,3 +37,11 @@ func TestPool(t *testing.T) {
 		t.Fatalf("Get returned an object with value %d, want 0", got.value)
 	}
 }
+
+func TestPoolWithoutFactoryReturnsZeroValue(t *testing.T) {
+	p := New[*reusable](nil)
+
+	if got := p.Get(); got != nil {
+		t.Fatalf("Get returned %#v, want nil", got)
+	}
+}

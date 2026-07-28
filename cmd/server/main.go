@@ -23,9 +23,9 @@ import (
 	"go.uber.org/zap"
 )
 
-var buildVersion string
-var buildDate string
-var buildCommit string
+var buildVersion = "N/A"
+var buildDate = "N/A"
+var buildCommit = "N/A"
 
 func main() {
 	printBuildInfo()
@@ -42,20 +42,7 @@ func main() {
 }
 
 func printBuildInfo() {
-	version := buildVersion
-	if version == "" {
-		version = "N/A"
-	}
-	date := buildDate
-	if date == "" {
-		date = "N/A"
-	}
-	commit := buildCommit
-	if commit == "" {
-		commit = "N/A"
-	}
-
-	fmt.Printf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", version, date, commit)
+	fmt.Printf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 }
 
 func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {

@@ -11,6 +11,13 @@ type Pool[T Resettable] struct {
 }
 
 func New[T Resettable](newFunc func() T) *Pool[T] {
+	if newFunc == nil {
+		newFunc = func() T {
+			var zero T
+			return zero
+		}
+	}
+
 	return &Pool[T]{
 		pool: sync.Pool{
 			New: func() any {
