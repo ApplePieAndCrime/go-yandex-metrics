@@ -16,7 +16,7 @@ type FlagConfig struct {
 	RateLimit       int    `env:"RATE_LIMIT"`
 }
 
-func parseFlags() FlagConfig {
+func parseFlags() (FlagConfig, error) {
 	cfg := FlagConfig{
 		ExternalAddress: "localhost:8080",
 		PollInterval:    2,
@@ -26,7 +26,7 @@ func parseFlags() FlagConfig {
 	}
 	err := env.Parse(&cfg)
 	if err != nil {
-		panic(err)
+		return FlagConfig{}, err
 	}
 
 	flag.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "адрес и порт для старта сервера")
@@ -42,5 +42,5 @@ func parseFlags() FlagConfig {
 		cfg.ExternalAddress = "http://" + cfg.ExternalAddress
 	}
 
-	return cfg
+	return cfg, nil
 }

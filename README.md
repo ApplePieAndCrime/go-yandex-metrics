@@ -69,3 +69,24 @@ go test ./internal/repository -bench BenchmarkMemoryStorage -benchmem -benchtime
 BenchmarkMemoryStorageSaveMetrics-10        301952 ns/op   584009 B/op   11012 allocs/op
 BenchmarkMemoryStorageGetMetricsByID-10        131.2 ns/op       72 B/op       2 allocs/op
 ```
+
+## Прогон linter
+```bash
+go run ./cmd/linter ./...
+```
+
+## Сборка с метаданными
+
+Версия, дата сборки и хеш коммита передаются в `buildVersion`, `buildDate` и `buildCommit` с помощью флага `-ldflags`. Например, для сервера:
+
+```bash
+go build -ldflags="-X 'main.buildVersion=v1.0.0' -X 'main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'main.buildCommit=$(git rev-parse HEAD)'" -o server ./cmd/server
+```
+
+Для агента используется та же команда с другим пакетом и именем бинарного файла:
+
+```bash
+go build -ldflags="-X 'main.buildVersion=v1.0.0' -X 'main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'main.buildCommit=$(git rev-parse HEAD)'" -o agent ./cmd/agent
+```
+
+Если значение не передано, приложение выведет для него `N/A`.

@@ -19,6 +19,12 @@ server-test:
 agent-test:
 	go test -v ./internal/agent
 
+linter:
+	go run ./cmd/linter ./...
+   
+code-generation:
+	go run ./cmd/reset
+
 # тесты для тасок
 test-iter1:
 	make server-build 
