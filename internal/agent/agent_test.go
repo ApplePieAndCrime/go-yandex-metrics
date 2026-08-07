@@ -2,6 +2,8 @@ package internal_agent
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +24,7 @@ func TestRunAgentStopsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	require.NoError(t, RunAgent(ctx, "http://example.com", 1, 1, "", 1))
+	require.NoError(t, RunAgent(ctx, "http://example.com", 1, 1, "", 1, ""))
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -64,7 +67,7 @@ func TestSendRequestToServer(t *testing.T) {
 
 	resp, statusCode, err := SendRequestToServer(client, "http://example.com", MemMetrics{
 		"test": {Type: models.Counter, Value: "100"},
-	}, "")
+	}, "", nil)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -88,11 +91,42 @@ func TestSendRequestToServerSetsHashHeader(t *testing.T) {
 
 	resp, statusCode, err := SendRequestToServer(client, "http://example.com", MemMetrics{
 		"test": {Type: models.Counter, Value: "100"},
-	}, "test-key")
+	}, "test-key", nil)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, statusCode)
+}
+
+func TestSendRequestToServerEncryptsBody(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body, readErr := io.ReadAll(r.Body)
+			require.NoError(t, readErr)
+			assert.NotContains(t, string(body), `"id":"test"`)
+
+			decrypted, decryptErr := cryptoutil.Decrypt(privateKey, body)
+			require.NoError(t, decryptErr)
+			assert.JSONEq(t, `[{"id":"test","type":"counter","delta":100}]`, string(decrypted))
+			assert.Equal(t, hashutil.SignBody(decrypted, "test-key"), r.Header.Get(hashutil.HeaderName))
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	resp, statusCode, err := SendRequestToServer(client, "http://example.com", MemMetrics{
+		"test": {Type: models.Counter, Value: "100"},
+	}, "test-key", &privateKey.PublicKey)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, statusCode)
 }
 
 func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
@@ -144,12 +178,12 @@ func TestCollectAndSendMetricsChangesBetweenReports(t *testing.T) {
 
 	safeMetrics.collect(randomFloat)
 	snapshot := safeMetrics.Snapshot()
-	_, err := sendAllMetrics(client, "http://example.com", &snapshot, "")
+	_, err := sendAllMetrics(client, "http://example.com", &snapshot, "", nil)
 	require.NoError(t, err)
 
 	safeMetrics.collect(randomFloat)
 	snapshot2 := safeMetrics.Snapshot()
-	_, err = sendAllMetrics(client, "http://example.com", &snapshot2, "")
+	_, err = sendAllMetrics(client, "http://example.com", &snapshot2, "", nil)
 	require.NoError(t, err)
 
 	require.Len(t, sent["PollCount"], 2)
@@ -190,7 +224,7 @@ func TestSendAllMetricsWithRetry(t *testing.T) {
 
 	_, err := sendAllMetricsWithRetry(client, "http://example.com", metrics, func(delay time.Duration) {
 		sleeps = append(sleeps, delay)
-	}, "")
+	}, "", nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, 4, attempts)
@@ -200,7 +234,7 @@ func TestSendAllMetricsWithRetry(t *testing.T) {
 func TestSendAllMetricsWithRetryDoesNotRetryNonTransportErrors(t *testing.T) {
 	_, _, err := SendRequestToServer(&http.Client{}, "http://example.com", MemMetrics{
 		"broken": {Type: "unsupported", Value: "1"},
-	}, "")
+	}, "", nil)
 	require.Error(t, err)
 	assert.False(t, isRetriableRequestError(err))
 }

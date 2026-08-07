@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
@@ -80,6 +82,15 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 
 // RunServer настраивает зависимости и запускает HTTP-сервер метрик.
 func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
+	var privateKey *rsa.PrivateKey
+	if flagConfig.CryptoKey != "" {
+		var err error
+		privateKey, err = cryptoutil.LoadPrivateKey(flagConfig.CryptoKey)
+		if err != nil {
+			return fmt.Errorf("load server crypto key: %w", err)
+		}
+		loggerSugar.Infoln("Using private key for request decryption")
+	}
 
 	var storage repository.Storage
 	var db *sql.DB
@@ -115,7 +126,7 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 	}()
 
 	services := service.NewService(storage)
-	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher)
+	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher, privateKey)
 
 	routes := handlers.InitRoutes()
 

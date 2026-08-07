@@ -16,6 +16,7 @@ type FlagConfig struct {
 	Key         string `env:"KEY"`
 	AuditFile   string `env:"AUDIT_FILE"`
 	AuditUrl    string `env:"AUDIT_URL"`
+	CryptoKey   string `env:"CRYPTO_KEY"`
 }
 
 func parseFlags() (*FlagConfig, error) {
@@ -28,6 +29,7 @@ func parseFlags() (*FlagConfig, error) {
 		Key:         "",
 		AuditFile:   "",
 		AuditUrl:    "",
+		CryptoKey:   "",
 	}
 
 	err := env.Parse(&cfg)
@@ -43,6 +45,7 @@ func parseFlags() (*FlagConfig, error) {
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
 	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "путь к файлу, в который сохраняются логи аудита")
 	flag.StringVar(&cfg.AuditUrl, "audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
+	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу приватного ключа")
 
 	flag.Parse()
 

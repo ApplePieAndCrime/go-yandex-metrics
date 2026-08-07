@@ -31,6 +31,7 @@ func main() {
 		flagConfig.ReportInterval,
 		flagConfig.Key,
 		flagConfig.RateLimit,
+		flagConfig.CryptoKey,
 	)
 
 	if err != nil {

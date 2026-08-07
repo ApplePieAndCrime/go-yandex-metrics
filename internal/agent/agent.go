@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
@@ -93,7 +95,17 @@ func RunAgent(
 	reportInterval int64,
 	key string,
 	rateLimit int,
+	cryptoKeyPath string,
 ) error {
+	var publicKey *rsa.PublicKey
+	if cryptoKeyPath != "" {
+		var err error
+		publicKey, err = cryptoutil.LoadPublicKey(cryptoKeyPath)
+		if err != nil {
+			return fmt.Errorf("load agent crypto key: %w", err)
+		}
+	}
+
 	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
 	startupTimer := time.NewTimer(2 * time.Second)
 	select {
@@ -149,7 +161,7 @@ func RunAgent(
 			pool.AddTask(func() {
 				snapshot := metrics.Snapshot()
 
-				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
+				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key, publicKey); err != nil {
 					pool.AddError(fmt.Errorf("metrics send error: %w", err))
 					return
 				}
@@ -165,7 +177,7 @@ type MemMetrics map[string]struct {
 	Value string
 }
 
-func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string) ([]byte, error) {
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string, publicKey *rsa.PublicKey) ([]byte, error) {
 
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
@@ -212,7 +224,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 		}
 	}
 
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key)
+	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key, publicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -226,11 +238,11 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 	return resBody, nil
 }
 
-func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string) ([]byte, error) {
+func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string, publicKey *rsa.PublicKey) ([]byte, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
-		resBody, err := sendAllMetrics(client, baseUrl, metrics, key)
+		resBody, err := sendAllMetrics(client, baseUrl, metrics, key, publicKey)
 		if err == nil {
 			return resBody, nil
 		}
@@ -284,7 +296,7 @@ type UpdatedMetrics struct {
 }
 
 // SendRequestToServer отправляет набор метрик на эндпоинт пакетного обновления.
-func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string) (*http.Response, int, error) {
+func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string, publicKey *rsa.PublicKey) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/updates/", baseUrl)
 
 	var payload []models.Metrics
@@ -319,7 +331,15 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 		return nil, http.StatusInternalServerError, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+	requestBody := body
+	if publicKey != nil {
+		requestBody, err = cryptoutil.Encrypt(publicKey, body)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("encrypt request: %w", err)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
