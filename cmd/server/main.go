@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
@@ -37,7 +36,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
 	defer stop()
 
 	err = RunServer(ctx, *flagConfig, loggerSugar)
@@ -133,13 +137,20 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 
 	routes := handlers.InitRoutes()
 
+	var (
+		stopFileStorage context.CancelFunc
+		fileStorageDone <-chan error
+	)
 	if flagConfig.DatabaseDsn == "" {
-		errCh := server.SaveMetricsToFile(*services, flagConfig.Interval, flagConfig.StoragePath, flagConfig.IsRestore)
-		go func() {
-			if err := <-errCh; err != nil {
-				log.Println("save metrics error:", err)
-			}
-		}()
+		fileStorageCtx, cancel := context.WithCancel(context.Background())
+		stopFileStorage = cancel
+		fileStorageDone = server.SaveMetricsToFileWithContext(
+			fileStorageCtx,
+			*services,
+			flagConfig.Interval,
+			flagConfig.StoragePath,
+			flagConfig.IsRestore,
+		)
 	}
 
 	httpServer := &http.Server{
@@ -155,12 +166,29 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 	select {
 	case err := <-serverErrors:
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			err = nil
 		}
-		return err
+		return errors.Join(err, stopAndFlushFileStorage(stopFileStorage, fileStorageDone))
+	case err := <-fileStorageDone:
+		shutdownErr := httpServer.Shutdown(context.Background())
+		if errors.Is(shutdownErr, http.ErrServerClosed) {
+			shutdownErr = nil
+		}
+		return errors.Join(err, shutdownErr)
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return httpServer.Shutdown(shutdownCtx)
+		// Shutdown перестаёт принимать новые запросы и ждёт завершения уже
+		// запущенных обработчиков. Только после этого фиксируем снимок в файл.
+		shutdownErr := httpServer.Shutdown(context.Background())
+		storageErr := stopAndFlushFileStorage(stopFileStorage, fileStorageDone)
+		return errors.Join(shutdownErr, storageErr)
 	}
+}
+
+func stopAndFlushFileStorage(cancel context.CancelFunc, done <-chan error) error {
+	if cancel == nil {
+		return nil
+	}
+
+	cancel()
+	return <-done
 }

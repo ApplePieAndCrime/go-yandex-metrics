@@ -39,8 +39,11 @@ type AgentMetrics struct {
 
 // SafeMetrics обеспечивает конкурентно-безопасное хранение снимка метрик агента.
 type SafeMetrics struct {
-	mu   sync.RWMutex
-	data AgentMetrics
+	mu           sync.RWMutex
+	sendMu       sync.Mutex
+	data         AgentMetrics
+	revision     uint64
+	sentRevision uint64
 }
 
 var retryIntervals = []time.Duration{
@@ -59,6 +62,7 @@ func (m *SafeMetrics) collect(randomFloat func() float64) error {
 	runtime.ReadMemStats(&m.data.MemStats)
 	m.data.PollCount++
 	m.data.RandomValue = randomFloat()
+	m.revision++
 
 	if memErr == nil && memStats != nil {
 		m.data.TotalMemory = memStats.Total
@@ -74,6 +78,11 @@ func (m *SafeMetrics) collect(randomFloat func() float64) error {
 
 // Snapshot возвращает независимую копию текущих метрик агента.
 func (m *SafeMetrics) Snapshot() AgentMetrics {
+	snapshot, _ := m.snapshotWithRevision()
+	return snapshot
+}
+
+func (m *SafeMetrics) snapshotWithRevision() (AgentMetrics, uint64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -84,7 +93,23 @@ func (m *SafeMetrics) Snapshot() AgentMetrics {
 		m.data.CPUutilization...,
 	)
 
-	return snapshot
+	return snapshot, m.revision
+}
+
+func (m *SafeMetrics) markSent(revision uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if revision > m.sentRevision {
+		m.sentRevision = revision
+	}
+}
+
+func (m *SafeMetrics) hasUnsent(revision uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return revision > m.sentRevision
 }
 
 // RunAgent запускает периодический сбор и отправку метрик на сервер.
@@ -143,8 +168,12 @@ func RunAgent(
 			pool.Close()
 			pool.Wait()
 
-			if poolErrors := pool.Errors(); len(poolErrors) > 0 {
-				return fmt.Errorf("errors: %v", poolErrors)
+			flushed, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+			if err != nil {
+				return fmt.Errorf("send metrics during shutdown: %w", err)
+			}
+			if flushed {
+				log.Println("metrics sent during shutdown")
 			}
 			return nil
 
@@ -159,16 +188,42 @@ func RunAgent(
 
 		case <-reportTicker.C:
 			pool.AddTask(func() {
-				snapshot := metrics.Snapshot()
-
-				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key, publicKey); err != nil {
-					pool.AddError(fmt.Errorf("metrics send error: %w", err))
+				sent, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+				if err != nil {
+					log.Printf("metrics send error: %v", err)
 					return
 				}
-				log.Println("metrics sent")
+				if sent {
+					log.Println("metrics sent")
+				}
 			})
 		}
 	}
+}
+
+func sendUnsentMetrics(
+	client *http.Client,
+	externalAddress string,
+	metrics *SafeMetrics,
+	key string,
+	publicKey *rsa.PublicKey,
+) (bool, error) {
+	// Сериализация отправок не позволяет более старому снимку прийти на сервер
+	// после нового при работе нескольких воркеров.
+	metrics.sendMu.Lock()
+	defer metrics.sendMu.Unlock()
+
+	snapshot, revision := metrics.snapshotWithRevision()
+	if !metrics.hasUnsent(revision) {
+		return false, nil
+	}
+
+	if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key, publicKey); err != nil {
+		return false, err
+	}
+
+	metrics.markSent(revision)
+	return true, nil
 }
 
 // MemMetrics сопоставляет имени метрики её тип и строковое значение.
@@ -234,8 +289,19 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &httpStatusError{statusCode: resp.StatusCode}
+	}
 
 	return resBody, nil
+}
+
+type httpStatusError struct {
+	statusCode int
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("server returned status %d", e.statusCode)
 }
 
 func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string, publicKey *rsa.PublicKey) ([]byte, error) {
@@ -259,6 +325,12 @@ func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *Agent
 }
 
 func isRetriableRequestError(err error) bool {
+	var statusErr *httpStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.statusCode == http.StatusTooManyRequests ||
+			statusErr.statusCode >= http.StatusInternalServerError
+	}
+
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		err = urlErr.Err
