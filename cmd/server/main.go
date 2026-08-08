@@ -34,6 +34,9 @@ func main() {
 
 	loggerSugar := logger.LoggerInitialize()
 	flagConfig, err := parseFlags()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
