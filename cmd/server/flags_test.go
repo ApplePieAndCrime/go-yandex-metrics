@@ -69,6 +69,16 @@ func TestParseFlagsGetsConfigPathFromEnvironment(t *testing.T) {
 	require.Equal(t, "env-config:8083", cfg.RunAddress)
 }
 
+func TestParseFlagsFindsConfigAfterOtherFlags(t *testing.T) {
+	configPath := writeConfig(t, `{"store_interval":"4s"}`)
+	prepareFlags(t, "-a", "flag:8082", "-config", configPath)
+
+	cfg, err := parseFlags()
+	require.NoError(t, err)
+	require.Equal(t, "flag:8082", cfg.RunAddress)
+	require.Equal(t, int64(4), cfg.Interval)
+}
+
 func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")

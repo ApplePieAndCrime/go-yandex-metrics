@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"os"
 	"strings"
 
@@ -37,9 +38,13 @@ func parseFlags() (FlagConfig, error) {
 		Key:             "",
 		RateLimit:       1,
 		CryptoKey:       "",
-		Config:          "",
 	}
-	cfg.Config = configutil.FilePath(os.Args[1:], os.Getenv("CONFIG"))
+
+	configPath, err := parseConfigPath(cfg, os.Args[1:], os.Getenv("CONFIG"))
+	if err != nil {
+		return FlagConfig{}, err
+	}
+	cfg.Config = configPath
 	if cfg.Config != "" {
 		if err := applyFileConfig(&cfg); err != nil {
 			return FlagConfig{}, err
@@ -50,16 +55,10 @@ func parseFlags() (FlagConfig, error) {
 		return FlagConfig{}, err
 	}
 
-	flag.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "адрес и порт для старта сервера")
-	flag.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "интервал опроса в секундах")
-	flag.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "интервал отчетов в секундах")
-	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
-	flag.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
-	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу публичного ключа")
-	flag.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
-	flag.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
-
-	flag.Parse()
+	registerFlags(flag.CommandLine, &cfg)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		return FlagConfig{}, err
+	}
 
 	if !strings.HasPrefix(cfg.ExternalAddress, "http://") &&
 		!strings.HasPrefix(cfg.ExternalAddress, "https://") {
@@ -67,6 +66,30 @@ func parseFlags() (FlagConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseConfigPath(cfg FlagConfig, args []string, envPath string) (string, error) {
+	cfg.Config = envPath
+
+	firstPass := flag.NewFlagSet("agent-config", flag.ContinueOnError)
+	firstPass.SetOutput(io.Discard)
+	registerFlags(firstPass, &cfg)
+	if err := firstPass.Parse(args); err != nil {
+		return "", err
+	}
+
+	return cfg.Config, nil
+}
+
+func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
+	flagSet.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "адрес и порт для старта сервера")
+	flagSet.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "интервал опроса в секундах")
+	flagSet.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "интервал отчетов в секундах")
+	flagSet.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
+	flagSet.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
+	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу публичного ключа")
+	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
+	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
 
 func applyFileConfig(cfg *FlagConfig) error {

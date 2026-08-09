@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"os"
 
 	configutil "github.com/ApplePieAndCrime/go-yandex-metrics/internal/config"
@@ -48,7 +49,11 @@ func parseFlags() (*FlagConfig, error) {
 		Config:      "",
 	}
 
-	cfg.Config = configutil.FilePath(os.Args[1:], os.Getenv("CONFIG"))
+	configPath, err := parseConfigPath(cfg, os.Args[1:], os.Getenv("CONFIG"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.Config = configPath
 	if cfg.Config != "" {
 		if err := applyFileConfig(&cfg); err != nil {
 			return nil, err
@@ -63,21 +68,39 @@ func parseFlags() (*FlagConfig, error) {
 		cfg.StoragePath = storeFile
 	}
 
-	flag.StringVar(&cfg.RunAddress, "a", cfg.RunAddress, "адрес для старта сервера")
-	flag.Int64Var(&cfg.Interval, "i", cfg.Interval, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
-	flag.StringVar(&cfg.StoragePath, "f", cfg.StoragePath, "путь до файла, куда сохраняются текущие значения")
-	flag.BoolVar(&cfg.IsRestore, "r", cfg.IsRestore, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
-	flag.StringVar(&cfg.DatabaseDsn, "d", cfg.DatabaseDsn, "строка подключения к базе данных")
-	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
-	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "путь к файлу, в который сохраняются логи аудита")
-	flag.StringVar(&cfg.AuditUrl, "audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
-	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу приватного ключа")
-	flag.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
-	flag.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
-
-	flag.Parse()
+	registerFlags(flag.CommandLine, &cfg)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
+}
+
+func parseConfigPath(cfg FlagConfig, args []string, envPath string) (string, error) {
+	cfg.Config = envPath
+
+	firstPass := flag.NewFlagSet("server-config", flag.ContinueOnError)
+	firstPass.SetOutput(io.Discard)
+	registerFlags(firstPass, &cfg)
+	if err := firstPass.Parse(args); err != nil {
+		return "", err
+	}
+
+	return cfg.Config, nil
+}
+
+func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
+	flagSet.StringVar(&cfg.RunAddress, "a", cfg.RunAddress, "адрес для старта сервера")
+	flagSet.Int64Var(&cfg.Interval, "i", cfg.Interval, "интервал времени в секундах, по истечении которого текущие показания сервера сохраняются на диск")
+	flagSet.StringVar(&cfg.StoragePath, "f", cfg.StoragePath, "путь до файла, куда сохраняются текущие значения")
+	flagSet.BoolVar(&cfg.IsRestore, "r", cfg.IsRestore, "определяет следует ли загружать ранее сохранённые значения из указанного файла при старте сервера")
+	flagSet.StringVar(&cfg.DatabaseDsn, "d", cfg.DatabaseDsn, "строка подключения к базе данных")
+	flagSet.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
+	flagSet.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "путь к файлу, в который сохраняются логи аудита")
+	flagSet.StringVar(&cfg.AuditUrl, "audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
+	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу приватного ключа")
+	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
+	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
 
 func applyFileConfig(cfg *FlagConfig) error {

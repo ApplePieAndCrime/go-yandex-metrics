@@ -60,6 +60,16 @@ func TestParseFlagsGetsConfigPathFromEnvironment(t *testing.T) {
 	require.Equal(t, "http://env-config:8083", cfg.ExternalAddress)
 }
 
+func TestParseFlagsFindsConfigAfterOtherFlags(t *testing.T) {
+	configPath := writeConfig(t, `{"poll_interval":"3s"}`)
+	prepareFlags(t, "-a", "flag:8082", "-c", configPath)
+
+	cfg, err := parseFlags()
+	require.NoError(t, err)
+	require.Equal(t, "http://flag:8082", cfg.ExternalAddress)
+	require.Equal(t, int64(3), cfg.PollInterval)
+}
+
 func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")

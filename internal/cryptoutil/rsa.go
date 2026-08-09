@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -21,19 +22,24 @@ func LoadPublicKey(path string) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("decode public key: PEM block not found")
 	}
 
-	if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+	key, pkixErr := x509.ParsePKIXPublicKey(block.Bytes)
+	if pkixErr == nil {
 		publicKey, ok := key.(*rsa.PublicKey)
 		if !ok {
-			return nil, fmt.Errorf("decode public key: key is not RSA")
+			return nil, errors.New("decode public key: key is not RSA")
 		}
 		return publicKey, nil
 	}
 
-	if publicKey, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+	publicKey, pkcs1Err := x509.ParsePKCS1PublicKey(block.Bytes)
+	if pkcs1Err == nil {
 		return publicKey, nil
 	}
 
-	return nil, fmt.Errorf("decode public key: unsupported RSA key format")
+	return nil, fmt.Errorf("decode public key: %w", errors.Join(
+		fmt.Errorf("parse PKIX: %w", pkixErr),
+		fmt.Errorf("parse PKCS1: %w", pkcs1Err),
+	))
 }
 
 func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {
@@ -47,19 +53,24 @@ func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("decode private key: PEM block not found")
 	}
 
-	if privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+	privateKey, pkcs1Err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if pkcs1Err == nil {
 		return privateKey, nil
 	}
 
-	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+	key, pkcs8Err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if pkcs8Err == nil {
 		privateKey, ok := key.(*rsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("decode private key: key is not RSA")
+			return nil, errors.New("decode private key: key is not RSA")
 		}
 		return privateKey, nil
 	}
 
-	return nil, fmt.Errorf("decode private key: unsupported RSA key format")
+	return nil, fmt.Errorf("decode private key: %w", errors.Join(
+		fmt.Errorf("parse PKCS1: %w", pkcs1Err),
+		fmt.Errorf("parse PKCS8: %w", pkcs8Err),
+	))
 }
 
 func Encrypt(publicKey *rsa.PublicKey, data []byte) ([]byte, error) {

@@ -4,29 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 )
-
-func FilePath(args []string, envPath string) string {
-	path := envPath
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case "-c", "--c", "-config", "--config":
-			if index+1 < len(args) {
-				path = args[index+1]
-				index++
-			}
-		default:
-			for _, prefix := range []string{"-c=", "--c=", "-config=", "--config="} {
-				if strings.HasPrefix(args[index], prefix) {
-					path = strings.TrimPrefix(args[index], prefix)
-				}
-			}
-		}
-	}
-	return path
-}
 
 func ReadJSON(path string, target any) error {
 	data, err := os.ReadFile(path)

@@ -56,3 +56,29 @@ func TestLoadRSAKeys(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, privateKey.D, loadedPrivateKey.D)
 }
+
+func TestLoadPublicKeyReturnsAllParseErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid-public.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: []byte("invalid DER"),
+	}), 0o600))
+
+	_, err := LoadPublicKey(path)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "parse PKIX")
+	require.ErrorContains(t, err, "parse PKCS1")
+}
+
+func TestLoadPrivateKeyReturnsAllParseErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid-private.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: []byte("invalid DER"),
+	}), 0o600))
+
+	_, err := LoadPrivateKey(path)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "parse PKCS1")
+	require.ErrorContains(t, err, "parse PKCS8")
+}
