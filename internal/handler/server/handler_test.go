@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -34,7 +37,7 @@ func newTestRouter(key string) http.Handler {
 	})
 
 	services := service.NewService(repo)
-	handlers := handler.NewHandler(services, loggerSugar, nil, key, nil)
+	handlers := handler.NewHandler(services, loggerSugar, nil, key, nil, nil)
 
 	return handlers.InitRoutes()
 }
@@ -45,7 +48,7 @@ func TestUpdateMetricsByJSONPublishesAudit(t *testing.T) {
 	services := service.NewService(repo)
 
 	publisher := &stubAuditPublisher{}
-	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher)
+	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher, nil)
 	router := handlers.InitRoutes()
 
 	body, err := json.Marshal(models.Metrics{
@@ -74,7 +77,7 @@ func TestBulkUpdateMetricsPublishesAuditForAllMetricNames(t *testing.T) {
 	services := service.NewService(repo)
 
 	publisher := &stubAuditPublisher{}
-	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher)
+	handlers := handler.NewHandler(services, loggerSugar, nil, "", publisher, nil)
 	router := handlers.InitRoutes()
 
 	body, err := json.Marshal([]models.Metrics{
@@ -309,6 +312,38 @@ func TestBulkUpdateMetrics(t *testing.T) {
 	}
 }
 
+func TestBulkUpdateMetricsDecryptsRequest(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	assert.NoError(t, err)
+
+	loggerSugar := logger.LoggerInitialize()
+	repo := repository.NewMemoryStorage()
+	services := service.NewService(repo)
+	router := handler.NewHandler(services, loggerSugar, nil, "test-key", nil, privateKey).InitRoutes()
+
+	body, err := json.Marshal([]models.Metrics{{
+		ID:    "encryptedGauge",
+		MType: models.Gauge,
+		Value: float64Ptr(42.5),
+	}})
+	assert.NoError(t, err)
+
+	encrypted, err := cryptoutil.Encrypt(&privateKey.PublicKey, body)
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(encrypted))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(hashutil.HeaderName, hashutil.SignBody(body, "test-key"))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	metric, exists, err := services.GetMetricsByID("encryptedGauge", models.Gauge)
+	assert.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, 42.5, *metric.Value)
+}
+
 func BenchmarkBulkUpdateMetrics(b *testing.B) {
 	router := newBenchmarkRouter()
 	metrics := make([]models.Metrics, 0, 100)
@@ -350,7 +385,7 @@ func newBenchmarkRouter() http.Handler {
 	repo := repository.NewMemoryStorage()
 	services := service.NewService(repo)
 	loggerSugar := zap.NewNop().Sugar()
-	handlers := handler.NewHandler(services, *loggerSugar, nil, "", nil)
+	handlers := handler.NewHandler(services, *loggerSugar, nil, "", nil, nil)
 
 	return handlers.InitRoutes()
 }

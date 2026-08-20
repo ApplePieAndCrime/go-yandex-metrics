@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +12,24 @@ import (
 
 // SaveMetricsToFile восстанавливает метрики из файла и запускает их периодическое сохранение.
 func SaveMetricsToFile(
+	services service.Service,
+	storeInterval int64,
+	fileStoragePath string,
+	isRestore bool,
+) <-chan error {
+	return SaveMetricsToFileWithContext(
+		context.Background(),
+		services,
+		storeInterval,
+		fileStoragePath,
+		isRestore,
+	)
+}
+
+// SaveMetricsToFileWithContext восстанавливает метрики, периодически сохраняет
+// их и выполняет последнюю запись перед завершением по контексту.
+func SaveMetricsToFileWithContext(
+	ctx context.Context,
 	services service.Service,
 	storeInterval int64,
 	fileStoragePath string,
@@ -39,31 +59,53 @@ func SaveMetricsToFile(
 	}
 
 	go func() {
-		ticker := time.NewTicker(time.Duration(storeInterval) * time.Second)
-		defer ticker.Stop()
+		defer close(errCh)
 
-		for range ticker.C {
-			storageMetricsList, err := services.GetAllMetrics()
-			if err != nil {
-				errCh <- fmt.Errorf("failed to get all metrics for file: %w", err)
+		var (
+			ticker  *time.Ticker
+			tickerC <-chan time.Time
+		)
+		if storeInterval > 0 {
+			ticker = time.NewTicker(time.Duration(storeInterval) * time.Second)
+			tickerC = ticker.C
+			defer ticker.Stop()
+		}
+
+		for {
+			select {
+			case <-tickerC:
+				if err := saveMetrics(services, fileStoragePath); err != nil {
+					errCh <- err
+					return
+				}
+			case <-ctx.Done():
+				if err := saveMetrics(services, fileStoragePath); err != nil {
+					errCh <- err
+				}
 				return
 			}
-
-			producer, err := file_converter.NewProducer(fileStoragePath)
-			if err != nil {
-				errCh <- fmt.Errorf("producer: can't open file: %w", err)
-				return
-			}
-
-			if err := producer.WriteEvent(storageMetricsList); err != nil {
-				producer.Close()
-				errCh <- fmt.Errorf("producer write error: %w", err)
-				return
-			}
-
-			producer.Close()
 		}
 	}()
 
 	return errCh
+}
+
+func saveMetrics(services service.Service, fileStoragePath string) error {
+	storageMetricsList, err := services.GetAllMetrics()
+	if err != nil {
+		return fmt.Errorf("failed to get all metrics for file: %w", err)
+	}
+
+	producer, err := file_converter.NewProducer(fileStoragePath)
+	if err != nil {
+		return fmt.Errorf("producer: can't open file: %w", err)
+	}
+
+	writeErr := producer.WriteEvent(storageMetricsList)
+	closeErr := producer.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fmt.Errorf("producer write error: %w", err)
+	}
+
+	return nil
 }

@@ -18,7 +18,7 @@ import (
 func exampleRouter() http.Handler {
 	storage := repository.NewMemoryStorage()
 	metricsService := service.NewService(storage)
-	metricsHandler := handler.NewHandler(metricsService, *zap.NewNop().Sugar(), nil, "", nil)
+	metricsHandler := handler.NewHandler(metricsService, *zap.NewNop().Sugar(), nil, "", nil, nil)
 	return metricsHandler.InitRoutes()
 }
 

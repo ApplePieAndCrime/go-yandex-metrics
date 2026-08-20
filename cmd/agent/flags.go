@@ -2,8 +2,11 @@ package main
 
 import (
 	"flag"
+	"io"
+	"os"
 	"strings"
 
+	configutil "github.com/ApplePieAndCrime/go-yandex-metrics/internal/config"
 	"github.com/caarlos0/env/v11"
 )
 
@@ -14,6 +17,17 @@ type FlagConfig struct {
 	ReportInterval  int64  `env:"REPORT_INTERVAL"`
 	Key             string `env:"KEY"`
 	RateLimit       int    `env:"RATE_LIMIT"`
+	CryptoKey       string `env:"CRYPTO_KEY"`
+	Config          string
+}
+
+type fileConfig struct {
+	Address        *string `json:"address"`
+	PollInterval   *string `json:"poll_interval"`
+	ReportInterval *string `json:"report_interval"`
+	Key            *string `json:"key"`
+	RateLimit      *int    `json:"rate_limit"`
+	CryptoKey      *string `json:"crypto_key"`
 }
 
 func parseFlags() (FlagConfig, error) {
@@ -23,19 +37,28 @@ func parseFlags() (FlagConfig, error) {
 		ReportInterval:  10,
 		Key:             "",
 		RateLimit:       1,
+		CryptoKey:       "",
 	}
-	err := env.Parse(&cfg)
+
+	configPath, err := parseConfigPath(cfg, os.Args[1:], os.Getenv("CONFIG"))
 	if err != nil {
 		return FlagConfig{}, err
 	}
+	cfg.Config = configPath
+	if cfg.Config != "" {
+		if err := applyFileConfig(&cfg); err != nil {
+			return FlagConfig{}, err
+		}
+	}
 
-	flag.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "адрес и порт для старта сервера")
-	flag.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "интервал опроса в секундах")
-	flag.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "интервал отчетов в секундах")
-	flag.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
-	flag.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
+	if err := env.Parse(&cfg); err != nil {
+		return FlagConfig{}, err
+	}
 
-	flag.Parse()
+	registerFlags(flag.CommandLine, &cfg)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		return FlagConfig{}, err
+	}
 
 	if !strings.HasPrefix(cfg.ExternalAddress, "http://") &&
 		!strings.HasPrefix(cfg.ExternalAddress, "https://") {
@@ -43,4 +66,64 @@ func parseFlags() (FlagConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseConfigPath(cfg FlagConfig, args []string, envPath string) (string, error) {
+	cfg.Config = envPath
+
+	firstPass := flag.NewFlagSet("agent-config", flag.ContinueOnError)
+	firstPass.SetOutput(io.Discard)
+	registerFlags(firstPass, &cfg)
+	if err := firstPass.Parse(args); err != nil {
+		return "", err
+	}
+
+	return cfg.Config, nil
+}
+
+func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
+	flagSet.StringVar(&cfg.ExternalAddress, "a", cfg.ExternalAddress, "адрес и порт для старта сервера")
+	flagSet.Int64Var(&cfg.PollInterval, "p", cfg.PollInterval, "интервал опроса в секундах")
+	flagSet.Int64Var(&cfg.ReportInterval, "r", cfg.ReportInterval, "интервал отчетов в секундах")
+	flagSet.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
+	flagSet.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
+	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу публичного ключа")
+	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
+	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
+}
+
+func applyFileConfig(cfg *FlagConfig) error {
+	var fileCfg fileConfig
+	if err := configutil.ReadJSON(cfg.Config, &fileCfg); err != nil {
+		return err
+	}
+
+	if fileCfg.Address != nil {
+		cfg.ExternalAddress = *fileCfg.Address
+	}
+	if fileCfg.PollInterval != nil {
+		var err error
+		cfg.PollInterval, err = configutil.DurationSeconds("poll_interval", *fileCfg.PollInterval)
+		if err != nil {
+			return err
+		}
+	}
+	if fileCfg.ReportInterval != nil {
+		var err error
+		cfg.ReportInterval, err = configutil.DurationSeconds("report_interval", *fileCfg.ReportInterval)
+		if err != nil {
+			return err
+		}
+	}
+	if fileCfg.Key != nil {
+		cfg.Key = *fileCfg.Key
+	}
+	if fileCfg.RateLimit != nil {
+		cfg.RateLimit = *fileCfg.RateLimit
+	}
+	if fileCfg.CryptoKey != nil {
+		cfg.CryptoKey = *fileCfg.CryptoKey
+	}
+
+	return nil
 }

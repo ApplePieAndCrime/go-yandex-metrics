@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rsa"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	zipper "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/gzip"
@@ -23,21 +25,23 @@ import (
 
 // Handler объединяет HTTP-обработчики сервера метрик и их зависимости.
 type Handler struct {
-	services *service.Service
-	logger   *zap.SugaredLogger
-	db       *sql.DB
-	key      string
-	audit    audit.Publisher
+	services   *service.Service
+	logger     *zap.SugaredLogger
+	db         *sql.DB
+	key        string
+	audit      audit.Publisher
+	privateKey *rsa.PrivateKey
 }
 
 // NewHandler создаёт набор HTTP-обработчиков сервера метрик.
-func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher) *Handler {
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher, privateKey *rsa.PrivateKey) *Handler {
 	return &Handler{
-		services: services,
-		logger:   logger.With("component", "handler"),
-		db:       db,
-		key:      key,
-		audit:    auditPublisher,
+		services:   services,
+		logger:     logger.With("component", "handler"),
+		db:         db,
+		key:        key,
+		audit:      auditPublisher,
+		privateKey: privateKey,
 	}
 }
 
@@ -400,6 +404,13 @@ func (h *Handler) readAndVerifyRequestBody(req *http.Request) ([]byte, error) {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if h.privateKey != nil {
+		body, err = cryptoutil.Decrypt(h.privateKey, body)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt request body: %w", err)
+		}
 	}
 
 	if isGzipBody(body) {

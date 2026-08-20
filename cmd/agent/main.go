@@ -21,7 +21,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
 	defer stop()
 
 	err = internal_agent.RunAgent(
@@ -31,6 +36,7 @@ func main() {
 		flagConfig.ReportInterval,
 		flagConfig.Key,
 		flagConfig.RateLimit,
+		flagConfig.CryptoKey,
 	)
 
 	if err != nil {

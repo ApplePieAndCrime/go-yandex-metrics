@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
@@ -37,8 +39,11 @@ type AgentMetrics struct {
 
 // SafeMetrics обеспечивает конкурентно-безопасное хранение снимка метрик агента.
 type SafeMetrics struct {
-	mu   sync.RWMutex
-	data AgentMetrics
+	mu           sync.RWMutex
+	sendMu       sync.Mutex
+	data         AgentMetrics
+	revision     uint64
+	sentRevision uint64
 }
 
 var retryIntervals = []time.Duration{
@@ -57,6 +62,7 @@ func (m *SafeMetrics) collect(randomFloat func() float64) error {
 	runtime.ReadMemStats(&m.data.MemStats)
 	m.data.PollCount++
 	m.data.RandomValue = randomFloat()
+	m.revision++
 
 	if memErr == nil && memStats != nil {
 		m.data.TotalMemory = memStats.Total
@@ -72,6 +78,11 @@ func (m *SafeMetrics) collect(randomFloat func() float64) error {
 
 // Snapshot возвращает независимую копию текущих метрик агента.
 func (m *SafeMetrics) Snapshot() AgentMetrics {
+	snapshot, _ := m.snapshotWithRevision()
+	return snapshot
+}
+
+func (m *SafeMetrics) snapshotWithRevision() (AgentMetrics, uint64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -82,7 +93,23 @@ func (m *SafeMetrics) Snapshot() AgentMetrics {
 		m.data.CPUutilization...,
 	)
 
-	return snapshot
+	return snapshot, m.revision
+}
+
+func (m *SafeMetrics) markSent(revision uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if revision > m.sentRevision {
+		m.sentRevision = revision
+	}
+}
+
+func (m *SafeMetrics) hasUnsent(revision uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return revision > m.sentRevision
 }
 
 // RunAgent запускает периодический сбор и отправку метрик на сервер.
@@ -93,7 +120,17 @@ func RunAgent(
 	reportInterval int64,
 	key string,
 	rateLimit int,
+	cryptoKeyPath string,
 ) error {
+	var publicKey *rsa.PublicKey
+	if cryptoKeyPath != "" {
+		var err error
+		publicKey, err = cryptoutil.LoadPublicKey(cryptoKeyPath)
+		if err != nil {
+			return fmt.Errorf("load agent crypto key: %w", err)
+		}
+	}
+
 	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
 	startupTimer := time.NewTimer(2 * time.Second)
 	select {
@@ -131,8 +168,12 @@ func RunAgent(
 			pool.Close()
 			pool.Wait()
 
-			if poolErrors := pool.Errors(); len(poolErrors) > 0 {
-				return fmt.Errorf("errors: %v", poolErrors)
+			flushed, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+			if err != nil {
+				return fmt.Errorf("send metrics during shutdown: %w", err)
+			}
+			if flushed {
+				log.Println("metrics sent during shutdown")
 			}
 			return nil
 
@@ -147,16 +188,43 @@ func RunAgent(
 
 		case <-reportTicker.C:
 			pool.AddTask(func() {
-				snapshot := metrics.Snapshot()
-
-				if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key); err != nil {
-					pool.AddError(fmt.Errorf("metrics send error: %w", err))
+				sent, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+				if err != nil {
+					log.Printf("metrics send error: %v", err)
 					return
 				}
-				log.Println("metrics sent")
+				if sent {
+					log.Println("metrics sent")
+				}
 			})
 		}
 	}
+}
+
+func sendUnsentMetrics(
+	client *http.Client,
+	externalAddress string,
+	metrics *SafeMetrics,
+	key string,
+	publicKey *rsa.PublicKey,
+) (bool, error) {
+	// Мьютекс намеренно удерживается во время HTTP-запроса и ретраев: отправки
+	// выполняются последовательно даже при rateLimit > 1. Здесь корректный
+	// порядок снимков важнее параллельной отправки; сбор метрик не блокируется.
+	metrics.sendMu.Lock()
+	defer metrics.sendMu.Unlock()
+
+	snapshot, revision := metrics.snapshotWithRevision()
+	if !metrics.hasUnsent(revision) {
+		return false, nil
+	}
+
+	if _, err := sendAllMetricsWithRetry(client, externalAddress, &snapshot, time.Sleep, key, publicKey); err != nil {
+		return false, err
+	}
+
+	metrics.markSent(revision)
+	return true, nil
 }
 
 // MemMetrics сопоставляет имени метрики её тип и строковое значение.
@@ -165,7 +233,7 @@ type MemMetrics map[string]struct {
 	Value string
 }
 
-func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string) ([]byte, error) {
+func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string, publicKey *rsa.PublicKey) ([]byte, error) {
 
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
@@ -212,7 +280,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 		}
 	}
 
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key)
+	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key, publicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -222,15 +290,26 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &httpStatusError{statusCode: resp.StatusCode}
+	}
 
 	return resBody, nil
 }
 
-func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string) ([]byte, error) {
+type httpStatusError struct {
+	statusCode int
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("server returned status %d", e.statusCode)
+}
+
+func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *AgentMetrics, sleep func(time.Duration), key string, publicKey *rsa.PublicKey) ([]byte, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
-		resBody, err := sendAllMetrics(client, baseUrl, metrics, key)
+		resBody, err := sendAllMetrics(client, baseUrl, metrics, key, publicKey)
 		if err == nil {
 			return resBody, nil
 		}
@@ -247,6 +326,12 @@ func sendAllMetricsWithRetry(client *http.Client, baseUrl string, metrics *Agent
 }
 
 func isRetriableRequestError(err error) bool {
+	var statusErr *httpStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.statusCode == http.StatusTooManyRequests ||
+			statusErr.statusCode >= http.StatusInternalServerError
+	}
+
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		err = urlErr.Err
@@ -284,7 +369,7 @@ type UpdatedMetrics struct {
 }
 
 // SendRequestToServer отправляет набор метрик на эндпоинт пакетного обновления.
-func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string) (*http.Response, int, error) {
+func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemMetrics, key string, publicKey *rsa.PublicKey) (*http.Response, int, error) {
 	url := fmt.Sprintf("%s/updates/", baseUrl)
 
 	var payload []models.Metrics
@@ -319,7 +404,15 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 		return nil, http.StatusInternalServerError, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+	requestBody := body
+	if publicKey != nil {
+		requestBody, err = cryptoutil.Encrypt(publicKey, body)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("encrypt request: %w", err)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
