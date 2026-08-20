@@ -40,6 +40,7 @@ func TestSendRequestToServer(t *testing.T) {
 			assert.Equal(t, http.MethodPost, r.Method)
 			assert.Equal(t, "/updates/", r.URL.Path)
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			assert.NotNil(t, net.ParseIP(r.Header.Get("X-Real-IP")))
 
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)

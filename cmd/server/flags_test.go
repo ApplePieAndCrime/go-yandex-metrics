@@ -20,7 +20,8 @@ func TestParseFlagsFromConfig(t *testing.T) {
 		"key":"config-secret",
 		"audit_file":"audit.log",
 		"audit_url":"http://audit.local",
-		"crypto_key":"private.pem"
+		"crypto_key":"private.pem",
+		"trusted_subnet":"192.168.1.0/24"
 	}`)
 	prepareFlags(t, "-config", configPath)
 
@@ -35,6 +36,7 @@ func TestParseFlagsFromConfig(t *testing.T) {
 	require.Equal(t, "audit.log", cfg.AuditFile)
 	require.Equal(t, "http://audit.local", cfg.AuditUrl)
 	require.Equal(t, "private.pem", cfg.CryptoKey)
+	require.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
 }
 
 func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
@@ -43,12 +45,14 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 		"restore":false,
 		"store_interval":"4s",
 		"store_file":"config.db",
-		"crypto_key":"config-private.pem"
+		"crypto_key":"config-private.pem",
+		"trusted_subnet":"10.0.0.0/8"
 	}`)
-	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-i", "11")
+	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-i", "11", "-t", "172.16.0.0/12")
 	t.Setenv("RESTORE", "true")
 	t.Setenv("STORE_FILE", "env.db")
 	t.Setenv("CRYPTO_KEY", "env-private.pem")
+	t.Setenv("TRUSTED_SUBNET", "192.168.0.0/16")
 
 	cfg, err := parseFlags()
 	require.NoError(t, err)
@@ -57,6 +61,7 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 	require.Equal(t, int64(11), cfg.Interval)
 	require.Equal(t, "env.db", cfg.StoragePath)
 	require.Equal(t, "env-private.pem", cfg.CryptoKey)
+	require.Equal(t, "172.16.0.0/12", cfg.TrustedSubnet)
 }
 
 func TestParseFlagsGetsConfigPathFromEnvironment(t *testing.T) {
@@ -97,7 +102,7 @@ func prepareFlags(t *testing.T, args ...string) {
 
 	envNames := []string{
 		"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "STORE_FILE", "RESTORE",
-		"DATABASE_DSN", "KEY", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG",
+		"DATABASE_DSN", "KEY", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "TRUSTED_SUBNET", "CONFIG",
 	}
 	type envValue struct {
 		value  string

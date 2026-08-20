@@ -419,6 +419,7 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", hostIP())
 
 	if key != "" {
 		req.Header.Set(hashutil.HeaderName, hashutil.SignBody(body, key))
@@ -440,4 +441,24 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 	resp.Body = io.NopCloser(bytes.NewReader(out))
 
 	return resp, resp.StatusCode, nil
+}
+
+func hostIP() string {
+	addresses, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, address := range addresses {
+			ip, _, parseErr := net.ParseCIDR(address.String())
+			if parseErr == nil && ip.To4() != nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+		for _, address := range addresses {
+			ip, _, parseErr := net.ParseCIDR(address.String())
+			if parseErr == nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+	}
+
+	return net.IPv4(127, 0, 0, 1).String()
 }

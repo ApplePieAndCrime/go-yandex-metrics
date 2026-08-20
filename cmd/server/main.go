@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -89,6 +90,15 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 
 // RunServer настраивает зависимости и запускает HTTP-сервер метрик.
 func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
+	var trustedSubnet *net.IPNet
+	if flagConfig.TrustedSubnet != "" {
+		_, parsedSubnet, err := net.ParseCIDR(flagConfig.TrustedSubnet)
+		if err != nil {
+			return fmt.Errorf("parse trusted subnet: %w", err)
+		}
+		trustedSubnet = parsedSubnet
+	}
+
 	var privateKey *rsa.PrivateKey
 	if flagConfig.CryptoKey != "" {
 		var err error
@@ -133,7 +143,7 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 	}()
 
 	services := service.NewService(storage)
-	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher, privateKey)
+	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher, privateKey, trustedSubnet)
 
 	routes := handlers.InitRoutes()
 
