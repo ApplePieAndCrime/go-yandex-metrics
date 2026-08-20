@@ -37,6 +37,7 @@ func main() {
 		flagConfig.Key,
 		flagConfig.RateLimit,
 		flagConfig.CryptoKey,
+		flagConfig.GRPCAddress,
 	)
 
 	if err != nil {

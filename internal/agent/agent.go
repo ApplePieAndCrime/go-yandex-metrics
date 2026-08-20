@@ -22,9 +22,12 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
+	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // AgentMetrics содержит снимок метрик среды выполнения и операционной системы.
@@ -121,6 +124,7 @@ func RunAgent(
 	key string,
 	rateLimit int,
 	cryptoKeyPath string,
+	grpcAddresses ...string,
 ) error {
 	var publicKey *rsa.PublicKey
 	if cryptoKeyPath != "" {
@@ -155,12 +159,31 @@ func RunAgent(
 		},
 	}
 
+	var grpcClient pb.MetricsClient
+	if len(grpcAddresses) > 0 && grpcAddresses[0] != "" {
+		connection, err := grpc.NewClient(
+			grpcAddresses[0],
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			return fmt.Errorf("create gRPC client: %w", err)
+		}
+		defer connection.Close()
+		grpcClient = pb.NewMetricsClient(connection)
+	}
+
 	pollTicker := time.NewTicker(currentPollInterval)
 	reportTicker := time.NewTicker(currentReportInterval)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
 	metrics := &SafeMetrics{}
+	sendCurrentMetrics := func() (bool, error) {
+		if grpcClient != nil {
+			return sendUnsentMetricsGRPC(grpcClient, metrics, currentReportInterval)
+		}
+		return sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+	}
 
 	for {
 		select {
@@ -168,7 +191,7 @@ func RunAgent(
 			pool.Close()
 			pool.Wait()
 
-			flushed, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+			flushed, err := sendCurrentMetrics()
 			if err != nil {
 				return fmt.Errorf("send metrics during shutdown: %w", err)
 			}
@@ -188,7 +211,7 @@ func RunAgent(
 
 		case <-reportTicker.C:
 			pool.AddTask(func() {
-				sent, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+				sent, err := sendCurrentMetrics()
 				if err != nil {
 					log.Printf("metrics send error: %v", err)
 					return
@@ -234,7 +257,24 @@ type MemMetrics map[string]struct {
 }
 
 func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string, publicKey *rsa.PublicKey) ([]byte, error) {
+	resp, _, err := SendRequestToServer(client, baseUrl, buildMemMetrics(metrics), key, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
+	resBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &httpStatusError{statusCode: resp.StatusCode}
+	}
+
+	return resBody, nil
+}
+
+func buildMemMetrics(metrics *AgentMetrics) MemMetrics {
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
 		"BuckHashSys":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.BuckHashSys)},
@@ -280,21 +320,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 		}
 	}
 
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key, publicKey)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	resBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &httpStatusError{statusCode: resp.StatusCode}
-	}
-
-	return resBody, nil
+	return memMetrics
 }
 
 type httpStatusError struct {

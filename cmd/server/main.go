@@ -14,7 +14,9 @@ import (
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
+	grpcserver "github.com/ApplePieAndCrime/go-yandex-metrics/internal/grpcserver"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
+	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
@@ -23,6 +25,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var buildVersion = "N/A"
@@ -147,6 +150,19 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 
 	routes := handlers.InitRoutes()
 
+	var grpcServer *grpc.Server
+	var grpcListener net.Listener
+	if flagConfig.GRPCAddress != "" {
+		grpcListener, err = net.Listen("tcp", flagConfig.GRPCAddress)
+		if err != nil {
+			return fmt.Errorf("listen gRPC address: %w", err)
+		}
+		grpcServer = grpc.NewServer(
+			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(trustedSubnet)),
+		)
+		pb.RegisterMetricsServer(grpcServer, grpcserver.NewMetricsServer(services))
+	}
+
 	var (
 		stopFileStorage context.CancelFunc
 		fileStorageDone <-chan error
@@ -167,20 +183,31 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 		Addr:    flagConfig.RunAddress,
 		Handler: routes,
 	}
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		serverErrors <- httpServer.ListenAndServe()
 	}()
+	if grpcServer != nil {
+		go func() {
+			serverErrors <- grpcServer.Serve(grpcListener)
+		}()
+	}
 
 	log.Println("Server is running on address:", flagConfig.RunAddress)
+	if grpcServer != nil {
+		log.Println("gRPC server is running on address:", flagConfig.GRPCAddress)
+	}
 	select {
 	case err := <-serverErrors:
-		if errors.Is(err, http.ErrServerClosed) {
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped) {
 			err = nil
 		}
-		return errors.Join(err, stopAndFlushFileStorage(stopFileStorage, fileStorageDone))
+		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
+		return errors.Join(err, shutdownErr, stopAndFlushFileStorage(stopFileStorage, fileStorageDone))
 	case err := <-fileStorageDone:
 		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
 		if errors.Is(shutdownErr, http.ErrServerClosed) {
 			shutdownErr = nil
 		}
@@ -189,8 +216,15 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 		// Shutdown перестаёт принимать новые запросы и ждёт завершения уже
 		// запущенных обработчиков. Только после этого фиксируем снимок в файл.
 		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
 		storageErr := stopAndFlushFileStorage(stopFileStorage, fileStorageDone)
 		return errors.Join(shutdownErr, storageErr)
+	}
+}
+
+func stopGRPCServer(server *grpc.Server) {
+	if server != nil {
+		server.GracefulStop()
 	}
 }
 

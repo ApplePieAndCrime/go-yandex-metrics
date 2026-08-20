@@ -21,6 +21,7 @@ type FlagConfig struct {
 	AuditUrl      string `env:"AUDIT_URL"`
 	CryptoKey     string `env:"CRYPTO_KEY"`
 	TrustedSubnet string `env:"TRUSTED_SUBNET"`
+	GRPCAddress   string `env:"GRPC_ADDRESS"`
 	Config        string
 }
 
@@ -35,6 +36,7 @@ type fileConfig struct {
 	AuditURL      *string `json:"audit_url"`
 	CryptoKey     *string `json:"crypto_key"`
 	TrustedSubnet *string `json:"trusted_subnet"`
+	GRPCAddress   *string `json:"grpc_address"`
 }
 
 func parseFlags() (*FlagConfig, error) {
@@ -49,6 +51,7 @@ func parseFlags() (*FlagConfig, error) {
 		AuditUrl:      "",
 		CryptoKey:     "",
 		TrustedSubnet: "",
+		GRPCAddress:   "",
 		Config:        "",
 	}
 
@@ -103,6 +106,8 @@ func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
 	flagSet.StringVar(&cfg.AuditUrl, "audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
 	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу приватного ключа")
 	flagSet.StringVar(&cfg.TrustedSubnet, "t", cfg.TrustedSubnet, "доверенная подсеть в формате CIDR")
+	flagSet.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCAddress, "grpc-address", cfg.GRPCAddress, "адрес gRPC-сервера")
 	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
 	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
@@ -146,6 +151,9 @@ func applyFileConfig(cfg *FlagConfig) error {
 	}
 	if fileCfg.TrustedSubnet != nil {
 		cfg.TrustedSubnet = *fileCfg.TrustedSubnet
+	}
+	if fileCfg.GRPCAddress != nil {
+		cfg.GRPCAddress = *fileCfg.GRPCAddress
 	}
 
 	return nil
