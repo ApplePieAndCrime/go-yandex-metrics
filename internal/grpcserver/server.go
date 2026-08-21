@@ -8,6 +8,7 @@ import (
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -20,15 +21,20 @@ const realIPMetadataKey = "x-real-ip"
 type MetricsServer struct {
 	pb.UnimplementedMetricsServer
 	service *service.Service
+	logger  *zap.SugaredLogger
 }
 
 // NewMetricsServer создаёт gRPC-сервис Metrics.
-func NewMetricsServer(service *service.Service) *MetricsServer {
-	return &MetricsServer{service: service}
+func NewMetricsServer(service *service.Service, loggers ...*zap.SugaredLogger) *MetricsServer {
+	logger := zap.NewNop().Sugar()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
+	return &MetricsServer{service: service, logger: logger}
 }
 
 // UpdateMetrics проверяет и сохраняет все метрики из запроса.
-func (s *MetricsServer) UpdateMetrics(_ context.Context, request *pb.UpdateMetricsRequest) (*pb.UpdateMetricsResponse, error) {
+func (s *MetricsServer) UpdateMetrics(ctx context.Context, request *pb.UpdateMetricsRequest) (*pb.UpdateMetricsResponse, error) {
 	if request == nil || len(request.GetMetrics()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "metrics batch is empty")
 	}
@@ -42,10 +48,15 @@ func (s *MetricsServer) UpdateMetrics(_ context.Context, request *pb.UpdateMetri
 		metrics = append(metrics, modelMetric)
 	}
 
-	for _, metric := range metrics {
-		if _, err := s.service.CreateOrUpdateMetrics(metric); err != nil {
-			return nil, status.Errorf(codes.Internal, "save metric %q: %v", metric.ID, err)
+	if err := ctx.Err(); err != nil {
+		return nil, status.FromContextError(err).Err()
+	}
+	if _, err := s.service.CreateOrUpdateMetricsBatch(ctx, metrics); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, status.FromContextError(ctxErr).Err()
 		}
+		s.logger.Errorw("failed to save metrics batch", "error", err, "metrics_count", len(metrics))
+		return nil, status.Error(codes.Internal, "failed to save metrics")
 	}
 
 	return pb.UpdateMetricsResponse_builder{}.Build(), nil

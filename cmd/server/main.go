@@ -172,7 +172,7 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 			grpc.Creds(transportCredentials),
 			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(trustedSubnet)),
 		)
-		pb.RegisterMetricsServer(grpcServer, grpcserver.NewMetricsServer(services))
+		pb.RegisterMetricsServer(grpcServer, grpcserver.NewMetricsServer(services, &loggerSugar))
 	}
 
 	var (

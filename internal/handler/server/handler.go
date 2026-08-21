@@ -64,7 +64,9 @@ func (h Handler) InitRoutes() *chi.Mux {
 		r.Post("/value/", h.GetMetricsByIDWithJSON)
 		r.Post("/value", h.GetMetricsByIDWithJSON)
 		r.Group(func(r chi.Router) {
-			r.Use(h.TrustedSubnetMiddleware)
+			if h.trustedSubnet != nil {
+				r.Use(h.TrustedSubnetMiddleware)
+			}
 			r.Post("/updates/", h.BulkUpdateMetrics)
 			r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
 			r.Post("/update/", h.UpdateMetricsByJSON)
@@ -81,11 +83,6 @@ func (h Handler) InitRoutes() *chi.Mux {
 // При отсутствии настройки запросы обрабатываются без ограничений.
 func (h Handler) TrustedSubnetMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if h.trustedSubnet == nil {
-			next.ServeHTTP(w, req)
-			return
-		}
-
 		agentIP := net.ParseIP(req.Header.Get("X-Real-IP"))
 		if agentIP == nil || !h.trustedSubnet.Contains(agentIP) {
 			w.WriteHeader(http.StatusForbidden)
@@ -401,19 +398,20 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		writeError(w, "Пустой массив", http.StatusBadRequest)
 		return
 	}
-	var updatedMetricsList []models.Metrics
-
 	for _, metrics := range metricsList {
-		if metrics.MType != models.Counter && metrics.MType != models.Gauge || (metrics.Delta == nil && metrics.Value == nil) {
+		if metrics.MType == models.Counter && metrics.Delta == nil ||
+			metrics.MType == models.Gauge && metrics.Value == nil ||
+			metrics.MType != models.Counter && metrics.MType != models.Gauge {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		updatedMetrics, err := h.services.CreateOrUpdateMetrics(metrics)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		updatedMetricsList = append(updatedMetricsList, *updatedMetrics)
+	}
+
+	updatedMetricsList, err := h.services.CreateOrUpdateMetricsBatch(req.Context(), metricsList)
+	if err != nil {
+		h.logger.Errorw("failed to save metrics batch", "error", err, "metrics_count", len(metricsList))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
 	}
 
 	resp, err := json.Marshal(updatedMetricsList)

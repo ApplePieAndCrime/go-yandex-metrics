@@ -51,3 +51,35 @@ func TestMemoryStorageGetAllMetricsReturnsDeepCopy(t *testing.T) {
 	require.True(t, exists)
 	assert.Equal(t, 10.5, *stored.Value)
 }
+
+func TestMemoryStorageSaveMetricsBatchIsAtomic(t *testing.T) {
+	storage := NewMemoryStorage()
+	value := 10.5
+
+	_, err := storage.SaveMetricsBatch(context.Background(), []models.Metrics{
+		{ID: "temperature", MType: models.Gauge, Value: &value},
+		{ID: "requests", MType: models.Counter},
+	})
+	require.Error(t, err)
+
+	metrics, err := storage.GetAllMetrics(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, metrics)
+}
+
+func TestMemoryStorageSaveMetricsBatchUpdatesAllMetrics(t *testing.T) {
+	storage := NewMemoryStorage()
+	value := 10.5
+	delta := int64(3)
+
+	saved, err := storage.SaveMetricsBatch(context.Background(), []models.Metrics{
+		{ID: "temperature", MType: models.Gauge, Value: &value},
+		{ID: "requests", MType: models.Counter, Delta: &delta},
+	})
+	require.NoError(t, err)
+	require.Len(t, saved, 2)
+
+	metrics, err := storage.GetAllMetrics(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, metrics, 2)
+}

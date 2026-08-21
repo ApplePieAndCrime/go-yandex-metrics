@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 // PostgresStorage хранит метрики в базе данных PostgreSQL.
 type PostgresStorage struct {
 	db *sql.DB
+}
+
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 var retrySleep = time.Sleep
@@ -75,57 +80,84 @@ func (s *PostgresStorage) GetAllMetrics(ctx context.Context) ([]models.Metrics, 
 
 // SaveMetrics создаёт или обновляет метрику в базе данных.
 func (s *PostgresStorage) SaveMetrics(ctx context.Context, metrics models.Metrics) (*models.Metrics, error) {
-	switch metrics.MType {
-	case models.Counter:
-		return withRetryValue(func() (*models.Metrics, error) {
-			row := s.db.QueryRowContext(
-				ctx,
-				`
-				INSERT INTO metrics (id, mtype, delta)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (id, mtype)
-				DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-				RETURNING id, mtype, delta, value
-				`,
-				metrics.ID,
-				metrics.MType,
-				metrics.Delta,
-			)
+	if err := validateMetric(metrics); err != nil {
+		return nil, err
+	}
+	return withRetryValue(func() (*models.Metrics, error) {
+		return saveMetric(ctx, s.db, metrics)
+	})
+}
 
-			var saved models.Metrics
-			if err := row.Scan(&saved.ID, &saved.MType, &saved.Delta, &saved.Value); err != nil {
-				return nil, err
-			}
-
-			return &saved, nil
-		})
-
-	case models.Gauge:
-		return withRetryValue(func() (*models.Metrics, error) {
-			row := s.db.QueryRowContext(
-				ctx,
-				`
-				INSERT INTO metrics (id, mtype, value)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (id, mtype)
-				DO UPDATE SET value = EXCLUDED.value
-				RETURNING id, mtype, delta, value
-				`,
-				metrics.ID,
-				metrics.MType,
-				metrics.Value,
-			)
-
-			var saved models.Metrics
-			if err := row.Scan(&saved.ID, &saved.MType, &saved.Delta, &saved.Value); err != nil {
-				return nil, err
-			}
-
-			return &saved, nil
-		})
+// SaveMetricsBatch атомарно сохраняет пакет метрик в одной транзакции.
+func (s *PostgresStorage) SaveMetricsBatch(ctx context.Context, metrics []models.Metrics) ([]models.Metrics, error) {
+	for _, metric := range metrics {
+		if err := validateMetric(metric); err != nil {
+			return nil, err
+		}
 	}
 
-	return nil, nil
+	return withRetryValue(func() ([]models.Metrics, error) {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		saved := make([]models.Metrics, 0, len(metrics))
+		for _, metric := range metrics {
+			savedMetric, err := saveMetric(ctx, tx, metric)
+			if err != nil {
+				return nil, errors.Join(err, tx.Rollback())
+			}
+			saved = append(saved, *savedMetric)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return saved, nil
+	})
+}
+
+func saveMetric(ctx context.Context, querier rowQuerier, metric models.Metrics) (*models.Metrics, error) {
+	var row *sql.Row
+	switch metric.MType {
+	case models.Counter:
+		row = querier.QueryRowContext(
+			ctx,
+			`
+			INSERT INTO metrics (id, mtype, delta)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (id, mtype)
+			DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+			RETURNING id, mtype, delta, value
+			`,
+			metric.ID,
+			metric.MType,
+			metric.Delta,
+		)
+	case models.Gauge:
+		row = querier.QueryRowContext(
+			ctx,
+			`
+			INSERT INTO metrics (id, mtype, value)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (id, mtype)
+			DO UPDATE SET value = EXCLUDED.value
+			RETURNING id, mtype, delta, value
+			`,
+			metric.ID,
+			metric.MType,
+			metric.Value,
+		)
+	default:
+		return nil, fmt.Errorf("unsupported metric type %q", metric.MType)
+	}
+
+	var saved models.Metrics
+	if err := row.Scan(&saved.ID, &saved.MType, &saved.Delta, &saved.Value); err != nil {
+		return nil, err
+	}
+	return &saved, nil
 }
 
 func withRetry(operation func() (*models.Metrics, bool, error)) (*models.Metrics, bool, error) {

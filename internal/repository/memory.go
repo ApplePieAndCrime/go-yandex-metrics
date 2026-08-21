@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
@@ -54,10 +55,49 @@ func (s *MemoryStorage) GetAllMetrics(_ context.Context) ([]models.Metrics, erro
 }
 
 // SaveMetrics сохраняет метрику, суммируя счётчик или заменяя измеритель.
-func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (*models.Metrics, error) {
+func (s *MemoryStorage) SaveMetrics(ctx context.Context, metrics models.Metrics) (*models.Metrics, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateMetric(metrics); err != nil {
+		return nil, err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
+	saved := s.saveMetricsLocked(metrics)
+	return &saved, nil
+}
+
+// SaveMetricsBatch атомарно сохраняет пакет метрик под одной блокировкой.
+func (s *MemoryStorage) SaveMetricsBatch(ctx context.Context, metrics []models.Metrics) ([]models.Metrics, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, metric := range metrics {
+		if err := validateMetric(metric); err != nil {
+			return nil, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	saved := make([]models.Metrics, 0, len(metrics))
+	for _, metric := range metrics {
+		saved = append(saved, s.saveMetricsLocked(metric))
+	}
+	return saved, nil
+}
+
+func (s *MemoryStorage) saveMetricsLocked(metrics models.Metrics) models.Metrics {
 	key := metricKey{id: metrics.ID, mType: metrics.MType}
 	if i, ok := s.index[key]; ok {
 		if metrics.MType == models.Counter && metrics.Delta != nil {
@@ -72,8 +112,7 @@ func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (
 			valueCopy := *metrics.Value
 			s.metrics[i].Value = &valueCopy
 		}
-		metricCopy := cloneMetric(s.metrics[i])
-		return &metricCopy, nil
+		return cloneMetric(s.metrics[i])
 	}
 
 	if metrics.Delta != nil {
@@ -87,8 +126,26 @@ func (s *MemoryStorage) SaveMetrics(_ context.Context, metrics models.Metrics) (
 
 	s.metrics = append(s.metrics, metrics)
 	s.index[key] = len(s.metrics) - 1
-	metricCopy := cloneMetric(s.metrics[len(s.metrics)-1])
-	return &metricCopy, nil
+	return cloneMetric(s.metrics[len(s.metrics)-1])
+}
+
+func validateMetric(metric models.Metrics) error {
+	if metric.ID == "" {
+		return fmt.Errorf("metric id is required")
+	}
+	switch metric.MType {
+	case models.Counter:
+		if metric.Delta == nil {
+			return fmt.Errorf("counter %q has no delta", metric.ID)
+		}
+	case models.Gauge:
+		if metric.Value == nil {
+			return fmt.Errorf("gauge %q has no value", metric.ID)
+		}
+	default:
+		return fmt.Errorf("unsupported metric type %q", metric.MType)
+	}
+	return nil
 }
 
 func cloneMetric(metric models.Metrics) models.Metrics {

@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -14,12 +15,79 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
+
+type cancelWaitingStorage struct {
+	repository.Storage
+	started chan struct{}
+}
+
+type failingBatchStorage struct {
+	repository.Storage
+	err error
+}
+
+func (s *failingBatchStorage) SaveMetricsBatch(context.Context, []models.Metrics) ([]models.Metrics, error) {
+	return nil, s.err
+}
+
+func (s *cancelWaitingStorage) SaveMetricsBatch(ctx context.Context, _ []models.Metrics) ([]models.Metrics, error) {
+	close(s.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestUpdateMetricsPropagatesCanceledContext(t *testing.T) {
+	storage := &cancelWaitingStorage{
+		Storage: repository.NewMemoryStorage(),
+		started: make(chan struct{}),
+	}
+	server := NewMetricsServer(service.NewService(storage))
+	request := pb.UpdateMetricsRequest_builder{Metrics: []*pb.Metric{
+		pb.Metric_builder{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5}.Build(),
+	}}.Build()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := server.UpdateMetrics(ctx, request)
+		result <- err
+	}()
+
+	<-storage.started
+	cancel()
+	assert.Equal(t, codes.Canceled, status.Code(<-result))
+}
+
+func TestUpdateMetricsHidesAndLogsInternalError(t *testing.T) {
+	internalErr := errors.New("database password=secret")
+	storage := &failingBatchStorage{
+		Storage: repository.NewMemoryStorage(),
+		err:     internalErr,
+	}
+	core, observedLogs := observer.New(zap.ErrorLevel)
+	server := NewMetricsServer(service.NewService(storage), zap.New(core).Sugar())
+	request := pb.UpdateMetricsRequest_builder{Metrics: []*pb.Metric{
+		pb.Metric_builder{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5}.Build(),
+	}}.Build()
+
+	_, err := server.UpdateMetrics(context.Background(), request)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	assert.Equal(t, "failed to save metrics", status.Convert(err).Message())
+	assert.NotContains(t, err.Error(), "password")
+
+	logs := observedLogs.FilterMessage("failed to save metrics batch").All()
+	require.Len(t, logs, 1)
+	assert.Equal(t, internalErr.Error(), logs[0].ContextMap()["error"])
+}
 
 func TestUpdateMetricsOverTLS(t *testing.T) {
 	directory := t.TempDir()
