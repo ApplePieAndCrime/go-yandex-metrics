@@ -59,9 +59,9 @@ func TestUpdateMetricsOverTLS(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err = pb.NewMetricsClient(connection).UpdateMetrics(ctx, &pb.UpdateMetricsRequest{Metrics: []*pb.Metric{
-		{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5},
-	}})
+	_, err = pb.NewMetricsClient(connection).UpdateMetrics(ctx, pb.UpdateMetricsRequest_builder{Metrics: []*pb.Metric{
+		pb.Metric_builder{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5}.Build(),
+	}}.Build())
 	require.NoError(t, err)
 }
 
@@ -70,10 +70,10 @@ func TestUpdateMetricsStoresBatch(t *testing.T) {
 	services := service.NewService(storage)
 	server := NewMetricsServer(services)
 
-	_, err := server.UpdateMetrics(context.Background(), &pb.UpdateMetricsRequest{Metrics: []*pb.Metric{
-		{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5},
-		{Id: "PollCount", Type: pb.Metric_COUNTER, Delta: 3},
-	}})
+	_, err := server.UpdateMetrics(context.Background(), pb.UpdateMetricsRequest_builder{Metrics: []*pb.Metric{
+		pb.Metric_builder{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5}.Build(),
+		pb.Metric_builder{Id: "PollCount", Type: pb.Metric_COUNTER, Delta: 3}.Build(),
+	}}.Build())
 	require.NoError(t, err)
 
 	gauge, exists, err := services.GetMetricsByID("Alloc", models.Gauge)

@@ -25,6 +25,14 @@ linter:
 code-generation:
 	go run ./cmd/reset
 
+proto-generation:
+	protoc --go_out=. \
+		--go_opt=module=github.com/ApplePieAndCrime/go-yandex-metrics \
+		--go_opt=default_api_level=API_OPAQUE \
+		--go-grpc_out=. \
+		--go-grpc_opt=module=github.com/ApplePieAndCrime/go-yandex-metrics \
+		proto/metrics.proto
+
 # тесты для тасок
 test-iter1:
 	make server-build 

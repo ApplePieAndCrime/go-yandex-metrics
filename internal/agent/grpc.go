@@ -3,9 +3,11 @@ package internal_agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
+	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -41,13 +43,16 @@ func sendAllMetricsGRPCWithRetry(
 	timeout time.Duration,
 	sleep func(time.Duration),
 ) error {
-	request := metricsToProtoRequest(metrics)
+	request, err := metricsToProtoRequest(metrics)
+	if err != nil {
+		return err
+	}
 	var lastErr error
 
 	for attempt := 0; attempt <= len(retryIntervals); attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		ctx = metadata.AppendToOutgoingContext(ctx, realIPMetadataKey, hostIP())
-		_, err := client.UpdateMetrics(ctx, request)
+		_, err = client.UpdateMetrics(ctx, request)
 		cancel()
 		if err == nil {
 			return nil
@@ -76,30 +81,32 @@ func isRetriableGRPCError(err error) bool {
 	}
 }
 
-func metricsToProtoRequest(metrics *AgentMetrics) *pb.UpdateMetricsRequest {
+func metricsToProtoRequest(metrics *AgentMetrics) (*pb.UpdateMetricsRequest, error) {
 	memMetrics := buildMemMetrics(metrics)
-	request := &pb.UpdateMetricsRequest{Metrics: make([]*pb.Metric, 0, len(memMetrics))}
+	protoMetrics := make([]*pb.Metric, 0, len(memMetrics))
 
 	for name, metric := range memMetrics {
-		protoMetric := &pb.Metric{Id: name}
+		builder := pb.Metric_builder{Id: name}
 		switch metric.Type {
-		case "counter":
-			protoMetric.Type = pb.Metric_COUNTER
+		case models.Counter:
+			builder.Type = pb.Metric_COUNTER
 			delta, err := strconv.ParseInt(metric.Value, 10, 64)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("parse counter %q: %w", name, err)
 			}
-			protoMetric.Delta = delta
-		default:
-			protoMetric.Type = pb.Metric_GAUGE
+			builder.Delta = delta
+		case models.Gauge:
+			builder.Type = pb.Metric_GAUGE
 			value, err := strconv.ParseFloat(metric.Value, 64)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("parse gauge %q: %w", name, err)
 			}
-			protoMetric.Value = value
+			builder.Value = value
+		default:
+			return nil, fmt.Errorf("unsupported metric type %q", metric.Type)
 		}
-		request.Metrics = append(request.Metrics, protoMetric)
+		protoMetrics = append(protoMetrics, builder.Build())
 	}
 
-	return request
+	return pb.UpdateMetricsRequest_builder{Metrics: protoMetrics}.Build(), nil
 }

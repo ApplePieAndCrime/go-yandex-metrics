@@ -48,7 +48,7 @@ func (s *MetricsServer) UpdateMetrics(_ context.Context, request *pb.UpdateMetri
 		}
 	}
 
-	return &pb.UpdateMetricsResponse{}, nil
+	return pb.UpdateMetricsResponse_builder{}.Build(), nil
 }
 
 func metricToModel(metric *pb.Metric) (models.Metrics, error) {

@@ -120,3 +120,10 @@ go run ./cmd/agent \
 ```
 
 Если адрес подключения не совпадает с DNS-именем из сертификата, ожидаемое имя можно задать флагом `-grpc-server-name`. Аналогичные параметры доступны через `GRPC_ADDRESS`, `GRPC_CERT_FILE`, `GRPC_KEY_FILE` (сервер), `GRPC_SERVER_NAME` (агент) и JSON-поля `grpc_address`, `grpc_cert_file`, `grpc_key_file`, `grpc_server_name`.
+
+## Proto
+Код из `metrics.proto` генерируется с использованием Opaque API:
+
+```bash
+make proto-generation
+```

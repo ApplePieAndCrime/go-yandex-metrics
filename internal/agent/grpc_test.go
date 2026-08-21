@@ -27,7 +27,7 @@ func (c *recordingMetricsClient) UpdateMetrics(ctx context.Context, request *pb.
 	if c.err != nil {
 		return nil, c.err
 	}
-	return &pb.UpdateMetricsResponse{}, nil
+	return pb.UpdateMetricsResponse_builder{}.Build(), nil
 }
 
 func TestSendAllMetricsGRPCSendsOneBatchWithRealIP(t *testing.T) {
