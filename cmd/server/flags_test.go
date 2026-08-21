@@ -22,7 +22,9 @@ func TestParseFlagsFromConfig(t *testing.T) {
 		"audit_url":"http://audit.local",
 		"crypto_key":"private.pem",
 		"trusted_subnet":"192.168.1.0/24",
-		"grpc_address":"config-grpc:3200"
+		"grpc_address":"config-grpc:3200",
+		"grpc_cert_file":"config-server.crt",
+		"grpc_key_file":"config-server.key"
 	}`)
 	prepareFlags(t, "-config", configPath)
 
@@ -39,6 +41,8 @@ func TestParseFlagsFromConfig(t *testing.T) {
 	require.Equal(t, "private.pem", cfg.CryptoKey)
 	require.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
 	require.Equal(t, "config-grpc:3200", cfg.GRPCAddress)
+	require.Equal(t, "config-server.crt", cfg.GRPCCertFile)
+	require.Equal(t, "config-server.key", cfg.GRPCKeyFile)
 }
 
 func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
@@ -50,12 +54,14 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 		"crypto_key":"config-private.pem",
 		"trusted_subnet":"10.0.0.0/8"
 	}`)
-	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-i", "11", "-t", "172.16.0.0/12", "-g", "flag-grpc:3201")
+	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-i", "11", "-t", "172.16.0.0/12", "-g", "flag-grpc:3201", "-grpc-cert", "flag-server.crt", "-grpc-key", "flag-server.key")
 	t.Setenv("RESTORE", "true")
 	t.Setenv("STORE_FILE", "env.db")
 	t.Setenv("CRYPTO_KEY", "env-private.pem")
 	t.Setenv("TRUSTED_SUBNET", "192.168.0.0/16")
 	t.Setenv("GRPC_ADDRESS", "env-grpc:3202")
+	t.Setenv("GRPC_CERT_FILE", "env-server.crt")
+	t.Setenv("GRPC_KEY_FILE", "env-server.key")
 
 	cfg, err := parseFlags()
 	require.NoError(t, err)
@@ -66,6 +72,8 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 	require.Equal(t, "env-private.pem", cfg.CryptoKey)
 	require.Equal(t, "172.16.0.0/12", cfg.TrustedSubnet)
 	require.Equal(t, "flag-grpc:3201", cfg.GRPCAddress)
+	require.Equal(t, "flag-server.crt", cfg.GRPCCertFile)
+	require.Equal(t, "flag-server.key", cfg.GRPCKeyFile)
 }
 
 func TestParseFlagsGetsConfigPathFromEnvironment(t *testing.T) {
@@ -106,7 +114,7 @@ func prepareFlags(t *testing.T, args ...string) {
 
 	envNames := []string{
 		"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "STORE_FILE", "RESTORE",
-		"DATABASE_DSN", "KEY", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "TRUSTED_SUBNET", "GRPC_ADDRESS", "CONFIG",
+		"DATABASE_DSN", "KEY", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "TRUSTED_SUBNET", "GRPC_ADDRESS", "GRPC_CERT_FILE", "GRPC_KEY_FILE", "CONFIG",
 	}
 	type envValue struct {
 		value  string

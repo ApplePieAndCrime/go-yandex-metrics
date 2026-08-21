@@ -3,19 +3,67 @@ package grpcserver
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"testing"
+	"time"
 
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 )
+
+func TestUpdateMetricsOverTLS(t *testing.T) {
+	directory := t.TempDir()
+	certFile := filepath.Join(directory, "server.crt")
+	keyFile := filepath.Join(directory, "server.key")
+	require.NoError(t, tlsutil.GenerateSelfSigned(tlsutil.CertificateOptions{
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		Hosts:    []string{"localhost"},
+		ValidFor: time.Hour,
+	}))
+
+	serverCredentials, err := tlsutil.LoadServerCredentials(certFile, keyFile)
+	require.NoError(t, err)
+	clientCredentials, err := tlsutil.LoadClientCredentials(certFile, "")
+	require.NoError(t, err)
+
+	storage := repository.NewMemoryStorage()
+	services := service.NewService(storage)
+	listener := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer(grpc.Creds(serverCredentials))
+	pb.RegisterMetricsServer(grpcServer, NewMetricsServer(services))
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(grpcServer.Stop)
+
+	connection, err := grpc.NewClient(
+		"passthrough:///localhost",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(clientCredentials),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = connection.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = pb.NewMetricsClient(connection).UpdateMetrics(ctx, &pb.UpdateMetricsRequest{Metrics: []*pb.Metric{
+		{Id: "Alloc", Type: pb.Metric_GAUGE, Value: 42.5},
+	}})
+	require.NoError(t, err)
+}
 
 func TestUpdateMetricsStoresBatch(t *testing.T) {
 	storage := repository.NewMemoryStorage()

@@ -21,6 +21,7 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -153,11 +154,22 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 	var grpcServer *grpc.Server
 	var grpcListener net.Listener
 	if flagConfig.GRPCAddress != "" {
+		if flagConfig.GRPCCertFile == "" || flagConfig.GRPCKeyFile == "" {
+			return fmt.Errorf("gRPC TLS certificate and private key are required")
+		}
+		transportCredentials, err := tlsutil.LoadServerCredentials(
+			flagConfig.GRPCCertFile,
+			flagConfig.GRPCKeyFile,
+		)
+		if err != nil {
+			return fmt.Errorf("load gRPC server credentials: %w", err)
+		}
 		grpcListener, err = net.Listen("tcp", flagConfig.GRPCAddress)
 		if err != nil {
 			return fmt.Errorf("listen gRPC address: %w", err)
 		}
 		grpcServer = grpc.NewServer(
+			grpc.Creds(transportCredentials),
 			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(trustedSubnet)),
 		)
 		pb.RegisterMetricsServer(grpcServer, grpcserver.NewMetricsServer(services))

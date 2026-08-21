@@ -22,6 +22,8 @@ type FlagConfig struct {
 	CryptoKey     string `env:"CRYPTO_KEY"`
 	TrustedSubnet string `env:"TRUSTED_SUBNET"`
 	GRPCAddress   string `env:"GRPC_ADDRESS"`
+	GRPCCertFile  string `env:"GRPC_CERT_FILE"`
+	GRPCKeyFile   string `env:"GRPC_KEY_FILE"`
 	Config        string
 }
 
@@ -37,6 +39,8 @@ type fileConfig struct {
 	CryptoKey     *string `json:"crypto_key"`
 	TrustedSubnet *string `json:"trusted_subnet"`
 	GRPCAddress   *string `json:"grpc_address"`
+	GRPCCertFile  *string `json:"grpc_cert_file"`
+	GRPCKeyFile   *string `json:"grpc_key_file"`
 }
 
 func parseFlags() (*FlagConfig, error) {
@@ -52,6 +56,8 @@ func parseFlags() (*FlagConfig, error) {
 		CryptoKey:     "",
 		TrustedSubnet: "",
 		GRPCAddress:   "",
+		GRPCCertFile:  "",
+		GRPCKeyFile:   "",
 		Config:        "",
 	}
 
@@ -108,6 +114,8 @@ func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
 	flagSet.StringVar(&cfg.TrustedSubnet, "t", cfg.TrustedSubnet, "доверенная подсеть в формате CIDR")
 	flagSet.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "адрес gRPC-сервера")
 	flagSet.StringVar(&cfg.GRPCAddress, "grpc-address", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCCertFile, "grpc-cert", cfg.GRPCCertFile, "путь к TLS-сертификату gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCKeyFile, "grpc-key", cfg.GRPCKeyFile, "путь к приватному ключу gRPC-сервера")
 	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
 	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
@@ -154,6 +162,12 @@ func applyFileConfig(cfg *FlagConfig) error {
 	}
 	if fileCfg.GRPCAddress != nil {
 		cfg.GRPCAddress = *fileCfg.GRPCAddress
+	}
+	if fileCfg.GRPCCertFile != nil {
+		cfg.GRPCCertFile = *fileCfg.GRPCCertFile
+	}
+	if fileCfg.GRPCKeyFile != nil {
+		cfg.GRPCKeyFile = *fileCfg.GRPCKeyFile
 	}
 
 	return nil

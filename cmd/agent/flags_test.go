@@ -18,7 +18,9 @@ func TestParseFlagsFromConfig(t *testing.T) {
 		"key":"config-secret",
 		"rate_limit":5,
 		"crypto_key":"public.pem",
-		"grpc_address":"config-grpc:3200"
+		"grpc_address":"config-grpc:3200",
+		"grpc_cert_file":"config-server.crt",
+		"grpc_server_name":"metrics.local"
 	}`)
 	prepareFlags(t, "-config", configPath)
 
@@ -31,6 +33,8 @@ func TestParseFlagsFromConfig(t *testing.T) {
 	require.Equal(t, 5, cfg.RateLimit)
 	require.Equal(t, "public.pem", cfg.CryptoKey)
 	require.Equal(t, "config-grpc:3200", cfg.GRPCAddress)
+	require.Equal(t, "config-server.crt", cfg.GRPCCertFile)
+	require.Equal(t, "metrics.local", cfg.GRPCServerName)
 }
 
 func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
@@ -40,10 +44,12 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 		"report_interval":"7s",
 		"crypto_key":"config-public.pem"
 	}`)
-	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-r", "11", "-g", "flag-grpc:3201")
+	prepareFlags(t, "-c", configPath, "-a", "flag:8082", "-r", "11", "-g", "flag-grpc:3201", "-grpc-cert", "flag-server.crt", "-grpc-server-name", "flag.local")
 	t.Setenv("POLL_INTERVAL", "9")
 	t.Setenv("CRYPTO_KEY", "env-public.pem")
 	t.Setenv("GRPC_ADDRESS", "env-grpc:3202")
+	t.Setenv("GRPC_CERT_FILE", "env-server.crt")
+	t.Setenv("GRPC_SERVER_NAME", "env.local")
 
 	cfg, err := parseFlags()
 	require.NoError(t, err)
@@ -52,6 +58,8 @@ func TestParseFlagsAndEnvironmentOverrideConfig(t *testing.T) {
 	require.Equal(t, int64(11), cfg.ReportInterval)
 	require.Equal(t, "env-public.pem", cfg.CryptoKey)
 	require.Equal(t, "flag-grpc:3201", cfg.GRPCAddress)
+	require.Equal(t, "flag-server.crt", cfg.GRPCCertFile)
+	require.Equal(t, "flag.local", cfg.GRPCServerName)
 }
 
 func TestParseFlagsGetsConfigPathFromEnvironment(t *testing.T) {
@@ -92,7 +100,7 @@ func prepareFlags(t *testing.T, args ...string) {
 
 	envNames := []string{
 		"ADDRESS", "POLL_INTERVAL", "REPORT_INTERVAL", "KEY",
-		"RATE_LIMIT", "CRYPTO_KEY", "GRPC_ADDRESS", "CONFIG",
+		"RATE_LIMIT", "CRYPTO_KEY", "GRPC_ADDRESS", "GRPC_CERT_FILE", "GRPC_SERVER_NAME", "CONFIG",
 	}
 	type envValue struct {
 		value  string

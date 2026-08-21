@@ -23,11 +23,11 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
 	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // AgentMetrics содержит снимок метрик среды выполнения и операционной системы.
@@ -53,6 +53,13 @@ var retryIntervals = []time.Duration{
 	time.Second,
 	3 * time.Second,
 	5 * time.Second,
+}
+
+// GRPCConfig задаёт защищённое подключение агента к gRPC-серверу.
+type GRPCConfig struct {
+	Address    string
+	CertFile   string
+	ServerName string
 }
 
 func (m *SafeMetrics) collect(randomFloat func() float64) error {
@@ -124,7 +131,7 @@ func RunAgent(
 	key string,
 	rateLimit int,
 	cryptoKeyPath string,
-	grpcAddresses ...string,
+	grpcConfigs ...GRPCConfig,
 ) error {
 	var publicKey *rsa.PublicKey
 	if cryptoKeyPath != "" {
@@ -133,6 +140,28 @@ func RunAgent(
 		if err != nil {
 			return fmt.Errorf("load agent crypto key: %w", err)
 		}
+	}
+
+	var grpcClient pb.MetricsClient
+	if len(grpcConfigs) > 0 && grpcConfigs[0].Address != "" {
+		grpcConfig := grpcConfigs[0]
+		if grpcConfig.CertFile == "" {
+			return fmt.Errorf("gRPC TLS certificate is required")
+		}
+
+		transportCredentials, err := tlsutil.LoadClientCredentials(grpcConfig.CertFile, grpcConfig.ServerName)
+		if err != nil {
+			return fmt.Errorf("load gRPC client credentials: %w", err)
+		}
+		connection, err := grpc.NewClient(
+			grpcConfig.Address,
+			grpc.WithTransportCredentials(transportCredentials),
+		)
+		if err != nil {
+			return fmt.Errorf("create gRPC client: %w", err)
+		}
+		defer connection.Close()
+		grpcClient = pb.NewMetricsClient(connection)
 	}
 
 	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
@@ -157,19 +186,6 @@ func RunAgent(
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 		},
-	}
-
-	var grpcClient pb.MetricsClient
-	if len(grpcAddresses) > 0 && grpcAddresses[0] != "" {
-		connection, err := grpc.NewClient(
-			grpcAddresses[0],
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		if err != nil {
-			return fmt.Errorf("create gRPC client: %w", err)
-		}
-		defer connection.Close()
-		grpcClient = pb.NewMetricsClient(connection)
 	}
 
 	pollTicker := time.NewTicker(currentPollInterval)

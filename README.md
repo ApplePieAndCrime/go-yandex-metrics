@@ -90,3 +90,33 @@ go build -ldflags="-X 'main.buildVersion=v1.0.0' -X 'main.buildDate=$(date -u +%
 ```
 
 Если значение не передано, приложение выведет для него `N/A`.
+
+## Защищённый gRPC-транспорт
+
+Для генерации самоподписанного TLS-сертификата выполните:
+
+```bash
+go run ./cmd/gencert \
+  -cert server.crt \
+  -key server.key \
+  -hosts localhost,127.0.0.1
+```
+
+Запустите HTTP- и gRPC-серверы, передав сертификат и приватный ключ:
+
+```bash
+go run ./cmd/server \
+  -g localhost:3200 \
+  -grpc-cert server.crt \
+  -grpc-key server.key
+```
+
+Агенту передаётся тот же сертификат как доверенный:
+
+```bash
+go run ./cmd/agent \
+  -g localhost:3200 \
+  -grpc-cert server.crt
+```
+
+Если адрес подключения не совпадает с DNS-именем из сертификата, ожидаемое имя можно задать флагом `-grpc-server-name`. Аналогичные параметры доступны через `GRPC_ADDRESS`, `GRPC_CERT_FILE`, `GRPC_KEY_FILE` (сервер), `GRPC_SERVER_NAME` (агент) и JSON-поля `grpc_address`, `grpc_cert_file`, `grpc_key_file`, `grpc_server_name`.
