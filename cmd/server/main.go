@@ -7,21 +7,26 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os/signal"
 	"syscall"
 
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/audit"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
+	grpcserver "github.com/ApplePieAndCrime/go-yandex-metrics/internal/grpcserver"
 	handler "github.com/ApplePieAndCrime/go-yandex-metrics/internal/handler/server"
+	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/repository"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/server"
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var buildVersion = "N/A"
@@ -89,6 +94,15 @@ func migrateDb(flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
 
 // RunServer настраивает зависимости и запускает HTTP-сервер метрик.
 func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.SugaredLogger) error {
+	var trustedSubnet *net.IPNet
+	if flagConfig.TrustedSubnet != "" {
+		_, parsedSubnet, err := net.ParseCIDR(flagConfig.TrustedSubnet)
+		if err != nil {
+			return fmt.Errorf("parse trusted subnet: %w", err)
+		}
+		trustedSubnet = parsedSubnet
+	}
+
 	var privateKey *rsa.PrivateKey
 	if flagConfig.CryptoKey != "" {
 		var err error
@@ -133,9 +147,33 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 	}()
 
 	services := service.NewService(storage)
-	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher, privateKey)
+	handlers := handler.NewHandler(services, loggerSugar, db, flagConfig.Key, auditPublisher, privateKey, trustedSubnet)
 
 	routes := handlers.InitRoutes()
+
+	var grpcServer *grpc.Server
+	var grpcListener net.Listener
+	if flagConfig.GRPCAddress != "" {
+		if flagConfig.GRPCCertFile == "" || flagConfig.GRPCKeyFile == "" {
+			return fmt.Errorf("gRPC TLS certificate and private key are required")
+		}
+		transportCredentials, err := tlsutil.LoadServerCredentials(
+			flagConfig.GRPCCertFile,
+			flagConfig.GRPCKeyFile,
+		)
+		if err != nil {
+			return fmt.Errorf("load gRPC server credentials: %w", err)
+		}
+		grpcListener, err = net.Listen("tcp", flagConfig.GRPCAddress)
+		if err != nil {
+			return fmt.Errorf("listen gRPC address: %w", err)
+		}
+		grpcServer = grpc.NewServer(
+			grpc.Creds(transportCredentials),
+			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(trustedSubnet)),
+		)
+		pb.RegisterMetricsServer(grpcServer, grpcserver.NewMetricsServer(services, &loggerSugar))
+	}
 
 	var (
 		stopFileStorage context.CancelFunc
@@ -157,20 +195,31 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 		Addr:    flagConfig.RunAddress,
 		Handler: routes,
 	}
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		serverErrors <- httpServer.ListenAndServe()
 	}()
+	if grpcServer != nil {
+		go func() {
+			serverErrors <- grpcServer.Serve(grpcListener)
+		}()
+	}
 
 	log.Println("Server is running on address:", flagConfig.RunAddress)
+	if grpcServer != nil {
+		log.Println("gRPC server is running on address:", flagConfig.GRPCAddress)
+	}
 	select {
 	case err := <-serverErrors:
-		if errors.Is(err, http.ErrServerClosed) {
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped) {
 			err = nil
 		}
-		return errors.Join(err, stopAndFlushFileStorage(stopFileStorage, fileStorageDone))
+		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
+		return errors.Join(err, shutdownErr, stopAndFlushFileStorage(stopFileStorage, fileStorageDone))
 	case err := <-fileStorageDone:
 		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
 		if errors.Is(shutdownErr, http.ErrServerClosed) {
 			shutdownErr = nil
 		}
@@ -179,8 +228,15 @@ func RunServer(ctx context.Context, flagConfig FlagConfig, loggerSugar zap.Sugar
 		// Shutdown перестаёт принимать новые запросы и ждёт завершения уже
 		// запущенных обработчиков. Только после этого фиксируем снимок в файл.
 		shutdownErr := httpServer.Shutdown(context.Background())
+		stopGRPCServer(grpcServer)
 		storageErr := stopAndFlushFileStorage(stopFileStorage, fileStorageDone)
 		return errors.Join(shutdownErr, storageErr)
+	}
+}
+
+func stopGRPCServer(server *grpc.Server) {
+	if server != nil {
+		server.GracefulStop()
 	}
 }
 

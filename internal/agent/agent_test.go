@@ -28,6 +28,21 @@ func TestRunAgentStopsWhenContextIsCanceled(t *testing.T) {
 	require.NoError(t, RunAgent(ctx, "http://example.com", 1, 1, "", 1, ""))
 }
 
+func TestRunAgentRequiresTLSCertificateForGRPC(t *testing.T) {
+	err := RunAgent(
+		context.Background(),
+		"http://example.com",
+		1,
+		1,
+		"",
+		1,
+		"",
+		GRPCConfig{Address: "localhost:3200"},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TLS certificate is required")
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -40,6 +55,7 @@ func TestSendRequestToServer(t *testing.T) {
 			assert.Equal(t, http.MethodPost, r.Method)
 			assert.Equal(t, "/updates/", r.URL.Path)
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			assert.NotNil(t, net.ParseIP(r.Header.Get("X-Real-IP")))
 
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)

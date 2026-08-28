@@ -37,6 +37,11 @@ func main() {
 		flagConfig.Key,
 		flagConfig.RateLimit,
 		flagConfig.CryptoKey,
+		internal_agent.GRPCConfig{
+			Address:    flagConfig.GRPCAddress,
+			CertFile:   flagConfig.GRPCCertFile,
+			ServerName: flagConfig.GRPCServerName,
+		},
 	)
 
 	if err != nil {

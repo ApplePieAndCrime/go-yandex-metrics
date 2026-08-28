@@ -44,9 +44,14 @@ func (s *Service) UpdateMetrics(existingMetric *models.Metrics, delta int64, val
 	return s.storage.SaveMetrics(context.Background(), updated)
 }
 
-// CreateOrUpdateMetrics сохраняет готовую модель метрики.
-func (s *Service) CreateOrUpdateMetrics(metrics models.Metrics) (*models.Metrics, error) {
-	return s.storage.SaveMetrics(context.Background(), metrics)
+// CreateOrUpdateMetrics сохраняет готовую модель метрики с учётом отмены операции.
+func (s *Service) CreateOrUpdateMetrics(ctx context.Context, metrics models.Metrics) (*models.Metrics, error) {
+	return s.storage.SaveMetrics(ctx, metrics)
+}
+
+// CreateOrUpdateMetricsBatch атомарно сохраняет пакет метрик.
+func (s *Service) CreateOrUpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) ([]models.Metrics, error) {
+	return s.storage.SaveMetricsBatch(ctx, metrics)
 }
 
 // CreateMetrics создаёт метрику указанного имени и типа.

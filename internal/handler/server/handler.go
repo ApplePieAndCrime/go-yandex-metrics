@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 
@@ -25,17 +26,18 @@ import (
 
 // Handler объединяет HTTP-обработчики сервера метрик и их зависимости.
 type Handler struct {
-	services   *service.Service
-	logger     *zap.SugaredLogger
-	db         *sql.DB
-	key        string
-	audit      audit.Publisher
-	privateKey *rsa.PrivateKey
+	services      *service.Service
+	logger        *zap.SugaredLogger
+	db            *sql.DB
+	key           string
+	audit         audit.Publisher
+	privateKey    *rsa.PrivateKey
+	trustedSubnet *net.IPNet
 }
 
 // NewHandler создаёт набор HTTP-обработчиков сервера метрик.
-func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher, privateKey *rsa.PrivateKey) *Handler {
-	return &Handler{
+func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB, key string, auditPublisher audit.Publisher, privateKey *rsa.PrivateKey, trustedSubnets ...*net.IPNet) *Handler {
+	h := &Handler{
 		services:   services,
 		logger:     logger.With("component", "handler"),
 		db:         db,
@@ -43,6 +45,11 @@ func NewHandler(services *service.Service, logger zap.SugaredLogger, db *sql.DB,
 		audit:      auditPublisher,
 		privateKey: privateKey,
 	}
+	if len(trustedSubnets) > 0 {
+		h.trustedSubnet = trustedSubnets[0]
+	}
+
+	return h
 }
 
 // InitRoutes создаёт маршрутизатор со всеми эндпоинтами и middleware сервера.
@@ -56,15 +63,34 @@ func (h Handler) InitRoutes() *chi.Mux {
 		r.Get("/value/{metricType}/{metricName}", h.GetMetricsByID)
 		r.Post("/value/", h.GetMetricsByIDWithJSON)
 		r.Post("/value", h.GetMetricsByIDWithJSON)
-		r.Post("/updates/", h.BulkUpdateMetrics)
-		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
-		r.Post("/update/", h.UpdateMetricsByJSON)
-		r.Post("/update", h.UpdateMetricsByJSON)
+		r.Group(func(r chi.Router) {
+			if h.trustedSubnet != nil {
+				r.Use(h.TrustedSubnetMiddleware)
+			}
+			r.Post("/updates/", h.BulkUpdateMetrics)
+			r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateMetrics)
+			r.Post("/update/", h.UpdateMetricsByJSON)
+			r.Post("/update", h.UpdateMetricsByJSON)
+		})
 		r.Get("/ping", h.Ping)
 		r.Get("/", h.GetAllMetrics)
 	})
 
 	return r
+}
+
+// TrustedSubnetMiddleware разрешает запись метрик только агентам из доверенной подсети.
+// При отсутствии настройки запросы обрабатываются без ограничений.
+func (h Handler) TrustedSubnetMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		agentIP := net.ParseIP(req.Header.Get("X-Real-IP"))
+		if agentIP == nil || !h.trustedSubnet.Contains(agentIP) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, req)
+	})
 }
 
 // Ping проверяет доступность подключения к базе данных.
@@ -372,19 +398,20 @@ func (h *Handler) BulkUpdateMetrics(w http.ResponseWriter, req *http.Request) {
 		writeError(w, "Пустой массив", http.StatusBadRequest)
 		return
 	}
-	var updatedMetricsList []models.Metrics
-
 	for _, metrics := range metricsList {
-		if metrics.MType != models.Counter && metrics.MType != models.Gauge || (metrics.Delta == nil && metrics.Value == nil) {
+		if metrics.MType == models.Counter && metrics.Delta == nil ||
+			metrics.MType == models.Gauge && metrics.Value == nil ||
+			metrics.MType != models.Counter && metrics.MType != models.Gauge {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		updatedMetrics, err := h.services.CreateOrUpdateMetrics(metrics)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		updatedMetricsList = append(updatedMetricsList, *updatedMetrics)
+	}
+
+	updatedMetricsList, err := h.services.CreateOrUpdateMetricsBatch(req.Context(), metricsList)
+	if err != nil {
+		h.logger.Errorw("failed to save metrics batch", "error", err, "metrics_count", len(metricsList))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
 	}
 
 	resp, err := json.Marshal(updatedMetricsList)

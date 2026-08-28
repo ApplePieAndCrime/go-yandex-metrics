@@ -19,7 +19,7 @@ func TestSaveMetricsToFileWithContextFlushesOnShutdown(t *testing.T) {
 	services := service.NewService(storage)
 
 	value := 42.5
-	_, err := services.CreateOrUpdateMetrics(models.Metrics{
+	_, err := services.CreateOrUpdateMetrics(context.Background(), models.Metrics{
 		ID:    "Alloc",
 		MType: models.Gauge,
 		Value: &value,

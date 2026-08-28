@@ -18,6 +18,8 @@ cmd/server/main
 cmd/server/server
 metricstest
 storage.json
+server.crt
+server.key
 
 # Dependency directories (remove the comment below to include it)
 vendor/

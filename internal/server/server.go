@@ -54,7 +54,11 @@ func SaveMetricsToFileWithContext(
 		}
 
 		for _, metrics := range metricsList {
-			services.CreateOrUpdateMetrics(metrics)
+			if _, err := services.CreateOrUpdateMetrics(ctx, metrics); err != nil {
+				errCh <- fmt.Errorf("restore metric %q: %w", metrics.ID, err)
+				close(errCh)
+				return errCh
+			}
 		}
 	}
 

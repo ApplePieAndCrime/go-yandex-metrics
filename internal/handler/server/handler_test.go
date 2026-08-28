@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	logger "github.com/ApplePieAndCrime/go-yandex-metrics/internal/server/logger"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/service"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -310,6 +312,51 @@ func TestBulkUpdateMetrics(t *testing.T) {
 			assert.Equal(t, "application/json", result.Header.Get("Content-Type"))
 		})
 	}
+}
+
+func TestTrustedSubnetMiddleware(t *testing.T) {
+	_, trustedSubnet, err := net.ParseCIDR("192.168.1.0/24")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		realIP     string
+		wantStatus int
+	}{
+		{name: "trusted address", realIP: "192.168.1.42", wantStatus: http.StatusOK},
+		{name: "untrusted address", realIP: "192.168.2.42", wantStatus: http.StatusForbidden},
+		{name: "missing address", wantStatus: http.StatusForbidden},
+		{name: "invalid address", realIP: "not-an-ip", wantStatus: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := repository.NewMemoryStorage()
+			services := service.NewService(repo)
+			router := handler.NewHandler(services, *zap.NewNop().Sugar(), nil, "", nil, nil, trustedSubnet).InitRoutes()
+
+			body := []byte(`[{"id":"gauge","type":"gauge","value":1}]`)
+			req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+			req.Header.Set("X-Real-IP", tt.realIP)
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+			assert.Equal(t, tt.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestEmptyTrustedSubnetDoesNotRestrictMetrics(t *testing.T) {
+	repo := repository.NewMemoryStorage()
+	services := service.NewService(repo)
+	router := handler.NewHandler(services, *zap.NewNop().Sugar(), nil, "", nil, nil).InitRoutes()
+
+	body := []byte(`[{"id":"gauge","type":"gauge","value":1}]`)
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestBulkUpdateMetricsDecryptsRequest(t *testing.T) {

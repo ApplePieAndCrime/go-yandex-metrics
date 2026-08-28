@@ -18,6 +18,9 @@ type FlagConfig struct {
 	Key             string `env:"KEY"`
 	RateLimit       int    `env:"RATE_LIMIT"`
 	CryptoKey       string `env:"CRYPTO_KEY"`
+	GRPCAddress     string `env:"GRPC_ADDRESS"`
+	GRPCCertFile    string `env:"GRPC_CERT_FILE"`
+	GRPCServerName  string `env:"GRPC_SERVER_NAME"`
 	Config          string
 }
 
@@ -28,6 +31,9 @@ type fileConfig struct {
 	Key            *string `json:"key"`
 	RateLimit      *int    `json:"rate_limit"`
 	CryptoKey      *string `json:"crypto_key"`
+	GRPCAddress    *string `json:"grpc_address"`
+	GRPCCertFile   *string `json:"grpc_cert_file"`
+	GRPCServerName *string `json:"grpc_server_name"`
 }
 
 func parseFlags() (FlagConfig, error) {
@@ -38,6 +44,9 @@ func parseFlags() (FlagConfig, error) {
 		Key:             "",
 		RateLimit:       1,
 		CryptoKey:       "",
+		GRPCAddress:     "",
+		GRPCCertFile:    "",
+		GRPCServerName:  "",
 	}
 
 	configPath, err := parseConfigPath(cfg, os.Args[1:], os.Getenv("CONFIG"))
@@ -88,6 +97,10 @@ func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
 	flagSet.StringVar(&cfg.Key, "k", cfg.Key, "ключ для авторизации")
 	flagSet.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "предел запросов в секунду")
 	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу публичного ключа")
+	flagSet.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCAddress, "grpc-address", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCCertFile, "grpc-cert", cfg.GRPCCertFile, "путь к доверенному TLS-сертификату gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCServerName, "grpc-server-name", cfg.GRPCServerName, "имя gRPC-сервера из TLS-сертификата")
 	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
 	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
@@ -123,6 +136,15 @@ func applyFileConfig(cfg *FlagConfig) error {
 	}
 	if fileCfg.CryptoKey != nil {
 		cfg.CryptoKey = *fileCfg.CryptoKey
+	}
+	if fileCfg.GRPCAddress != nil {
+		cfg.GRPCAddress = *fileCfg.GRPCAddress
+	}
+	if fileCfg.GRPCCertFile != nil {
+		cfg.GRPCCertFile = *fileCfg.GRPCCertFile
+	}
+	if fileCfg.GRPCServerName != nil {
+		cfg.GRPCServerName = *fileCfg.GRPCServerName
 	}
 
 	return nil

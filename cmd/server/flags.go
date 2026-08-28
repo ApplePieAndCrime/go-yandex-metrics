@@ -11,16 +11,20 @@ import (
 
 // FlagConfig содержит параметры запуска сервера.
 type FlagConfig struct {
-	RunAddress  string `env:"ADDRESS"`
-	Interval    int64  `env:"STORE_INTERVAL"`
-	StoragePath string `env:"FILE_STORAGE_PATH"`
-	IsRestore   bool   `env:"RESTORE"`
-	DatabaseDsn string `env:"DATABASE_DSN"`
-	Key         string `env:"KEY"`
-	AuditFile   string `env:"AUDIT_FILE"`
-	AuditUrl    string `env:"AUDIT_URL"`
-	CryptoKey   string `env:"CRYPTO_KEY"`
-	Config      string
+	RunAddress    string `env:"ADDRESS"`
+	Interval      int64  `env:"STORE_INTERVAL"`
+	StoragePath   string `env:"FILE_STORAGE_PATH"`
+	IsRestore     bool   `env:"RESTORE"`
+	DatabaseDsn   string `env:"DATABASE_DSN"`
+	Key           string `env:"KEY"`
+	AuditFile     string `env:"AUDIT_FILE"`
+	AuditUrl      string `env:"AUDIT_URL"`
+	CryptoKey     string `env:"CRYPTO_KEY"`
+	TrustedSubnet string `env:"TRUSTED_SUBNET"`
+	GRPCAddress   string `env:"GRPC_ADDRESS"`
+	GRPCCertFile  string `env:"GRPC_CERT_FILE"`
+	GRPCKeyFile   string `env:"GRPC_KEY_FILE"`
+	Config        string
 }
 
 type fileConfig struct {
@@ -33,20 +37,28 @@ type fileConfig struct {
 	AuditFile     *string `json:"audit_file"`
 	AuditURL      *string `json:"audit_url"`
 	CryptoKey     *string `json:"crypto_key"`
+	TrustedSubnet *string `json:"trusted_subnet"`
+	GRPCAddress   *string `json:"grpc_address"`
+	GRPCCertFile  *string `json:"grpc_cert_file"`
+	GRPCKeyFile   *string `json:"grpc_key_file"`
 }
 
 func parseFlags() (*FlagConfig, error) {
 	cfg := FlagConfig{
-		RunAddress:  "localhost:8080",
-		Interval:    300,
-		StoragePath: "storage.json",
-		IsRestore:   true,
-		DatabaseDsn: "",
-		Key:         "",
-		AuditFile:   "",
-		AuditUrl:    "",
-		CryptoKey:   "",
-		Config:      "",
+		RunAddress:    "localhost:8080",
+		Interval:      300,
+		StoragePath:   "storage.json",
+		IsRestore:     true,
+		DatabaseDsn:   "",
+		Key:           "",
+		AuditFile:     "",
+		AuditUrl:      "",
+		CryptoKey:     "",
+		TrustedSubnet: "",
+		GRPCAddress:   "",
+		GRPCCertFile:  "",
+		GRPCKeyFile:   "",
+		Config:        "",
 	}
 
 	configPath, err := parseConfigPath(cfg, os.Args[1:], os.Getenv("CONFIG"))
@@ -99,6 +111,11 @@ func registerFlags(flagSet *flag.FlagSet, cfg *FlagConfig) {
 	flagSet.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "путь к файлу, в который сохраняются логи аудита")
 	flagSet.StringVar(&cfg.AuditUrl, "audit-url", cfg.AuditUrl, "полный URL, по которому отправляются логи аудита")
 	flagSet.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "путь к файлу приватного ключа")
+	flagSet.StringVar(&cfg.TrustedSubnet, "t", cfg.TrustedSubnet, "доверенная подсеть в формате CIDR")
+	flagSet.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCAddress, "grpc-address", cfg.GRPCAddress, "адрес gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCCertFile, "grpc-cert", cfg.GRPCCertFile, "путь к TLS-сертификату gRPC-сервера")
+	flagSet.StringVar(&cfg.GRPCKeyFile, "grpc-key", cfg.GRPCKeyFile, "путь к приватному ключу gRPC-сервера")
 	flagSet.StringVar(&cfg.Config, "c", cfg.Config, "путь к JSON-файлу конфигурации")
 	flagSet.StringVar(&cfg.Config, "config", cfg.Config, "путь к JSON-файлу конфигурации")
 }
@@ -139,6 +156,18 @@ func applyFileConfig(cfg *FlagConfig) error {
 	}
 	if fileCfg.CryptoKey != nil {
 		cfg.CryptoKey = *fileCfg.CryptoKey
+	}
+	if fileCfg.TrustedSubnet != nil {
+		cfg.TrustedSubnet = *fileCfg.TrustedSubnet
+	}
+	if fileCfg.GRPCAddress != nil {
+		cfg.GRPCAddress = *fileCfg.GRPCAddress
+	}
+	if fileCfg.GRPCCertFile != nil {
+		cfg.GRPCCertFile = *fileCfg.GRPCCertFile
+	}
+	if fileCfg.GRPCKeyFile != nil {
+		cfg.GRPCKeyFile = *fileCfg.GRPCKeyFile
 	}
 
 	return nil

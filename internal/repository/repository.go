@@ -11,6 +11,7 @@ type Storage interface {
 	GetMetricsByID(ctx context.Context, id string, mType string) (*models.Metrics, bool, error)
 	GetAllMetrics(ctx context.Context) ([]models.Metrics, error)
 	SaveMetrics(ctx context.Context, metrics models.Metrics) (*models.Metrics, error)
+	SaveMetricsBatch(ctx context.Context, metrics []models.Metrics) ([]models.Metrics, error)
 }
 
 // Repository объединяет реализацию хранилища с репозиторием метрик.

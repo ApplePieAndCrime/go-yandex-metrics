@@ -22,9 +22,12 @@ import (
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/cryptoutil"
 	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/hashutil"
 	models "github.com/ApplePieAndCrime/go-yandex-metrics/internal/model"
+	pb "github.com/ApplePieAndCrime/go-yandex-metrics/internal/proto"
+	"github.com/ApplePieAndCrime/go-yandex-metrics/internal/tlsutil"
 	workerPool "github.com/ApplePieAndCrime/go-yandex-metrics/internal/workerpool"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
+	"google.golang.org/grpc"
 )
 
 // AgentMetrics содержит снимок метрик среды выполнения и операционной системы.
@@ -50,6 +53,13 @@ var retryIntervals = []time.Duration{
 	time.Second,
 	3 * time.Second,
 	5 * time.Second,
+}
+
+// GRPCConfig задаёт защищённое подключение агента к gRPC-серверу.
+type GRPCConfig struct {
+	Address    string
+	CertFile   string
+	ServerName string
 }
 
 func (m *SafeMetrics) collect(randomFloat func() float64) error {
@@ -121,6 +131,7 @@ func RunAgent(
 	key string,
 	rateLimit int,
 	cryptoKeyPath string,
+	grpcConfigs ...GRPCConfig,
 ) error {
 	var publicKey *rsa.PublicKey
 	if cryptoKeyPath != "" {
@@ -129,6 +140,28 @@ func RunAgent(
 		if err != nil {
 			return fmt.Errorf("load agent crypto key: %w", err)
 		}
+	}
+
+	var grpcClient pb.MetricsClient
+	if len(grpcConfigs) > 0 && grpcConfigs[0].Address != "" {
+		grpcConfig := grpcConfigs[0]
+		if grpcConfig.CertFile == "" {
+			return fmt.Errorf("gRPC TLS certificate is required")
+		}
+
+		transportCredentials, err := tlsutil.LoadClientCredentials(grpcConfig.CertFile, grpcConfig.ServerName)
+		if err != nil {
+			return fmt.Errorf("load gRPC client credentials: %w", err)
+		}
+		connection, err := grpc.NewClient(
+			grpcConfig.Address,
+			grpc.WithTransportCredentials(transportCredentials),
+		)
+		if err != nil {
+			return fmt.Errorf("create gRPC client: %w", err)
+		}
+		defer connection.Close()
+		grpcClient = pb.NewMetricsClient(connection)
 	}
 
 	// Даём серверу время на запуск, но не задерживаем штатное завершение агента.
@@ -161,6 +194,12 @@ func RunAgent(
 	defer reportTicker.Stop()
 
 	metrics := &SafeMetrics{}
+	sendCurrentMetrics := func() (bool, error) {
+		if grpcClient != nil {
+			return sendUnsentMetricsGRPC(grpcClient, metrics, currentReportInterval)
+		}
+		return sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+	}
 
 	for {
 		select {
@@ -168,7 +207,7 @@ func RunAgent(
 			pool.Close()
 			pool.Wait()
 
-			flushed, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+			flushed, err := sendCurrentMetrics()
 			if err != nil {
 				return fmt.Errorf("send metrics during shutdown: %w", err)
 			}
@@ -188,7 +227,7 @@ func RunAgent(
 
 		case <-reportTicker.C:
 			pool.AddTask(func() {
-				sent, err := sendUnsentMetrics(client, externalAddress, metrics, key, publicKey)
+				sent, err := sendCurrentMetrics()
 				if err != nil {
 					log.Printf("metrics send error: %v", err)
 					return
@@ -234,7 +273,24 @@ type MemMetrics map[string]struct {
 }
 
 func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, key string, publicKey *rsa.PublicKey) ([]byte, error) {
+	resp, _, err := SendRequestToServer(client, baseUrl, buildMemMetrics(metrics), key, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
+	resBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &httpStatusError{statusCode: resp.StatusCode}
+	}
+
+	return resBody, nil
+}
+
+func buildMemMetrics(metrics *AgentMetrics) MemMetrics {
 	memMetrics := MemMetrics{
 		"Alloc":         {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.Alloc)},
 		"BuckHashSys":   {Type: "gauge", Value: fmt.Sprintf("%d", metrics.MemStats.BuckHashSys)},
@@ -280,21 +336,7 @@ func sendAllMetrics(client *http.Client, baseUrl string, metrics *AgentMetrics, 
 		}
 	}
 
-	resp, _, err := SendRequestToServer(client, baseUrl, memMetrics, key, publicKey)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	resBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &httpStatusError{statusCode: resp.StatusCode}
-	}
-
-	return resBody, nil
+	return memMetrics
 }
 
 type httpStatusError struct {
@@ -419,6 +461,7 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", hostIP())
 
 	if key != "" {
 		req.Header.Set(hashutil.HeaderName, hashutil.SignBody(body, key))
@@ -440,4 +483,24 @@ func SendRequestToServer(client *http.Client, baseUrl string, updatedBodies MemM
 	resp.Body = io.NopCloser(bytes.NewReader(out))
 
 	return resp, resp.StatusCode, nil
+}
+
+func hostIP() string {
+	addresses, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, address := range addresses {
+			ip, _, parseErr := net.ParseCIDR(address.String())
+			if parseErr == nil && ip.To4() != nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+		for _, address := range addresses {
+			ip, _, parseErr := net.ParseCIDR(address.String())
+			if parseErr == nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+	}
+
+	return net.IPv4(127, 0, 0, 1).String()
 }
